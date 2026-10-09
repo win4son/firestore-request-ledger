@@ -1,0 +1,12 @@
+node_modules/
+dist/
+example/dist/
+*.log
+firestore-debug.log
+firebase-debug.log
+ui-debug.log
+.firebase/
+.DS_Store
+*.tgz
+coverage/
+test/fixtures/.readme/

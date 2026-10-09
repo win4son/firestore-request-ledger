@@ -1,0 +1,12 @@
+rules_version = '2';
+
+// Deny every client SDK read and write. The ledger and the example's data are
+// only touched by trusted server code (the Admin / server SDK bypasses rules).
+// A client that could write ledger records could forge replayed results.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

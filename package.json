@@ -1,0 +1,68 @@
+{
+  "name": "firestore-request-ledger",
+  "version": "0.1.0",
+  "description": "Request deduplication, replay and unconfirmed-outcome tracking for Firestore transactions and browser clients.",
+  "keywords": [
+    "firestore",
+    "firebase",
+    "idempotency",
+    "deduplication",
+    "request-id",
+    "retry",
+    "transactions"
+  ],
+  "license": "MIT",
+  "author": "Li Chi Hang",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/win4son/firestore-request-ledger.git"
+  },
+  "bugs": {
+    "url": "https://github.com/win4son/firestore-request-ledger/issues"
+  },
+  "homepage": "https://github.com/win4son/firestore-request-ledger#readme",
+  "type": "module",
+  "exports": {
+    "./server": {
+      "types": "./dist/server/index.d.ts",
+      "default": "./dist/server/index.js"
+    },
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "default": "./dist/client/index.js"
+    },
+    "./wire": {
+      "types": "./dist/shared/wire.d.ts",
+      "default": "./dist/shared/wire.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json && node scripts/check-readme.mjs",
+    "test:unit": "node --test \"test/unit/**/*.test.ts\"",
+    "test:integration": "firebase emulators:exec --project demo-request-ledger --only firestore \"node --test --test-concurrency=1 \\\"test/integration/**/*.test.ts\\\"\"",
+    "test": "npm run test:unit && npm run test:integration",
+    "build": "npm run build:lib && npm run build:example && node scripts/check-dist.mjs",
+    "check:release": "node scripts/check-release.mjs",
+    "prepublishOnly": "node scripts/check-release.mjs && npm run build",
+    "build:lib": "node scripts/clean-dist.mjs && tsc -p tsconfig.build.json",
+    "build:example": "vite build --config example/vite.config.ts",
+    "example": "firebase emulators:exec --project demo-request-ledger --only firestore \"node example/dev.ts\""
+  },
+  "devDependencies": {
+    "@google-cloud/firestore": "9.3.1",
+    "@types/node": "22.20.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "firebase-tools": "15.20.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.3"
+  }
+}

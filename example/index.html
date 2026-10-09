@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Request ledger demo</title>
+    <style>
+      :root {
+        --bg: #f6f7f9;
+        --card: #ffffff;
+        --text: #1d2330;
+        --muted: #5b6475;
+        --border: #d9dde5;
+        --accent: #2457c5;
+        --accent-text: #ffffff;
+        --ok: #1f7a4a;
+        --bad: #b42318;
+        --unknown: #9a6700;
+        --warn-bg: #fff4d6;
+        color-scheme: light;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #12151b;
+          --card: #1b2029;
+          --text: #e7eaf0;
+          --muted: #9aa3b2;
+          --border: #2e3542;
+          --accent: #7aa2ff;
+          --accent-text: #0d1422;
+          --ok: #5fd39a;
+          --bad: #ff8a80;
+          --unknown: #f5c451;
+          --warn-bg: #3a2f12;
+          color-scheme: dark;
+        }
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+      main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+      h1 { font-size: 1.5rem; margin: 0 0 4px; }
+      h2 { font-size: 1.05rem; margin: 0 0 12px; }
+      header { margin-bottom: 16px; }
+      .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+      .muted { color: var(--muted); }
+      .small { font-size: 0.85rem; }
+      .figure { font-size: 1.4rem; font-variant-numeric: tabular-nums; }
+      label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; }
+      label.inline { flex-direction: row; align-items: center; gap: 6px; margin: 4px 0; }
+      .row { display: flex; gap: 12px; flex-wrap: wrap; }
+      .grow { flex: 1 1 200px; }
+      input[type="text"], input[type="number"], select { font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--text); min-width: 0; }
+      fieldset { border: 1px solid var(--border); border-radius: 8px; margin: 12px 0; padding: 8px 12px; }
+      button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-text); cursor: pointer; }
+      button.secondary { background: transparent; color: var(--accent); }
+      button:disabled { opacity: 0.5; cursor: progress; }
+      .status { min-height: 1.5em; margin: 12px 0 0; }
+      .warning { background: var(--warn-bg); border-radius: 6px; padding: 8px 10px; }
+      .entries { list-style: none; margin: 0; padding: 0; }
+      .entries li { border-top: 1px solid var(--border); padding: 10px 0; }
+      .entries li:first-child { border-top: none; }
+      .entry-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; overflow-wrap: anywhere; }
+      .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+      .badge { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+      .badge.completed { color: var(--ok); }
+      .badge.rejected { color: var(--bad); }
+      .badge.unconfirmed { color: var(--unknown); }
+      code { font-size: 0.85rem; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

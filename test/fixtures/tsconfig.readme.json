@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noUnusedLocals": false,
+    "paths": {
+      "firestore-request-ledger/server": ["../../src/server/index.ts"],
+      "firestore-request-ledger/client": ["../../src/client/index.ts"]
+    }
+  },
+  "include": [".readme/*.ts"],
+  "exclude": []
+}
