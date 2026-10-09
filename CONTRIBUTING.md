@@ -52,25 +52,43 @@ The bugs this library exists to prevent hide in orderings, so:
   tests, build.
 - By contributing you agree that your contribution is licensed under the
   project's license (MIT, see `LICENSE`).
+- Signed commits are welcome but not required. The signing rules below apply
+  only to the maintainer's release commits and tags.
 
 ## Releasing
+
+These steps are for the maintainer.
 
 1. The maintainer's decisions are filled in: copyright holder (`LICENSE`),
    security contact (`SECURITY.md`), README status and install section,
    `package.json` metadata. `npm run check:release` lists anything missing;
    `npm publish` runs the same check (`prepublishOnly`) and refuses until it
    passes, then rebuilds `dist/`.
-2. Push the release commit to `main` and wait until CI passes **for that exact
-   commit**.
-3. Only then create the version tag on that commit, as an annotated tag
-   (`git tag -a v0.1.0 <commit> -m v0.1.0`), and push it. A tag is never moved:
-   if CI fails, fix forward and tag the next commit.
-4. Publish from a clean checkout of the tag, in this order: `npm ci`,
+2. Create release commits and tags in a checkout with signing enabled: an SSH
+   signing key registered on the maintainer's GitHub account, and
+   `gpg.format=ssh`, `user.signingkey`, `commit.gpgsign=true` and
+   `tag.gpgSign=true` in that repository's Git configuration. Before pushing,
+   `git verify-commit <commit>` (and later `git verify-tag <tag>`) must report a
+   good signature.
+3. Push the release commit to `main` and wait until CI passes **for that exact
+   commit**. Then check that GitHub reports the commit as verified; this must
+   print `true`:
+   `gh api repos/win4son/firestore-request-ledger/commits/<commit> --jq .commit.verification.verified`.
+   If it does not, stop and do not tag.
+4. Only then create the version tag on that commit, as an annotated tag
+   (`git tag -a v0.1.0 <commit> -m v0.1.0`, signed by `tag.gpgSign`), and push
+   it. A tag is never moved: if CI fails, fix forward and tag the next commit.
+5. Read the tag back with both refs:
+   `git ls-remote <repo> 'refs/tags/v0.1.0' 'refs/tags/v0.1.0^{}'`. The second
+   line (the annotated tag's target) must be the release commit. The first line
+   is the tag object; GitHub must report it as verified (prints `true`):
+   `gh api repos/win4son/firestore-request-ledger/git/tags/<tag object> --jq .verification.verified`.
+6. Publish from a clean checkout of the tag, in this order: `npm ci`,
    `npm run check:release`, `npm run build` (`dist/` is not in Git: without
    the build the package holds only 3 files), `npm pack --dry-run` (check the
    file list), `npm pack` (keep the tarball), then `npm publish`. Compare the
    published `dist.integrity` with that tarball.
-5. When reading the tag back, ask for both refs:
-   `git ls-remote <repo> 'refs/tags/v0.1.0' 'refs/tags/v0.1.0^{}'`. The second
-   line (the annotated tag's target) must be the release commit.
 
+The 0.1.0 commit and its `v0.1.0` tag were created before signing was set up
+and are unsigned. They stay as they are: history is not rewritten and tags are
+not moved to add signatures.
