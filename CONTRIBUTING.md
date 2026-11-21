@@ -8,16 +8,24 @@ with the failure cases tested.
 
 - Node.js 22.18 or newer
 - Java 21 or newer (Firestore emulator)
+- Chromium browser for Playwright E2E tests
 - No Firebase account, project or credentials are needed
 
 ```sh
 npm ci
-npm run typecheck          # tsc + README snippet check
-npm run test:unit          # fast, no emulator
-npm run test:integration   # Firestore emulator, project demo-request-ledger
-npm run build              # library, example, package checks
-npm run example            # interactive demo on http://127.0.0.1:5191
+npm run test:browser:install # install Playwright Chromium (or: npx playwright install chromium)
+npm run typecheck            # tsc + README snippet check
+npm run test:unit            # fast, no emulator
+npm run test:integration     # Firestore emulator, project demo-request-ledger
+npm run test:browser         # multi-tab browser E2E tests (Playwright + Firestore emulator)
+npm run test:all             # run unit, integration and browser E2E tests
+npm run build                # library, example, package checks
+npm run example              # interactive demo on http://127.0.0.1:5191
 ```
+
+For Linux / CI environments needing system dependencies, `npm run test:browser:install`
+runs `playwright install --with-deps chromium`. On local developer machines,
+`npx playwright install chromium` is sufficient.
 
 ## Ground rules
 
@@ -38,18 +46,29 @@ The bugs this library exists to prevent hide in orderings, so:
 - Make races **deterministic**: use the doubles in `test/helpers` (deferred
   promises, the fake Firestore's `beforeTransaction` / `beforeCommit` hooks, a
   wrapped `FirestoreLike` against the emulator) instead of timing.
+- For browser multi-tab tests (`test/browser`), **never gamble on timing with
+  `setTimeout` or `page.waitForTimeout()`**. Keep races strictly deterministic by
+  designing explicit synchronization points: Deferred promises, network request
+  gates (`route.fetch()`, `route.abort()`, `route.fulfill()`), observable UI
+  locators, and storage states. Always assert invariants on **both sides**: the
+  browser UI / `localStorage` state *and* the backend Firestore emulator state.
 - When you add a case, add its neighbour that should behave differently (same
   id vs. different id, same actor vs. different actor, before vs. after commit).
 - Give tests an id prefix (`S` server/emulator, `U` server unit, `C` client,
-  `E` example, `K`/`W` canonical/wire, `P` release checks) and reference new
-  guarantees in the README.
+  `E` example, `K`/`W` canonical/wire, `P` release checks, `B` browser E2E tests
+  in `test/browser`, cases `B01`–`B10`) and reference new guarantees in the README.
+- If a browser E2E test fails, a trace zip file is automatically captured under
+  `test-results/traces/<case>-<unique-suffix>.zip`. You can inspect it locally with:
+  ```sh
+  npx playwright show-trace test-results/traces/<trace-file>.zip
+  ```
 
 ## Pull requests
 
 - One topic per pull request, with a short description of the failure case it
   addresses and the tests that show it.
-- CI must pass: clean install, type check, unit tests, emulator integration
-  tests, build.
+- CI must pass: clean install, browser install, type check, unit tests, emulator
+  integration tests, build, browser E2E tests.
 - By contributing you agree that your contribution is licensed under the
   project's license (MIT, see `LICENSE`).
 - Signed commits are welcome but not required. The signing rules below apply
