@@ -10,3 +10,4 @@ ui-debug.log
 *.tgz
 coverage/
 test/fixtures/.readme/
+test-results/
