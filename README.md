@@ -92,18 +92,22 @@ available, Web Locks.
 
 Every claim below has tests in this repository. `test/unit` uses deterministic
 doubles to order races precisely. `test/integration` runs the real
-`@google-cloud/firestore` SDK against the local Firestore emulator. Test ids
-are in brackets.
+`@google-cloud/firestore` SDK against the local Firestore emulator. `test/browser`
+drives the example application across multiple tabs in headless Chromium using
+Playwright, verifying native Web Locks, storage events, and recovery against
+the local Firestore emulator. Test ids are in brackets.
 
 - One execution and one ledger record for repeated or concurrent same-id
-  requests, with identical replies [S02, S03, U09].
+  requests, with identical replies [S02, S03, U09]. Normal single-tab submit
+  and acknowledge commits once and clears the acknowledged entry [B01].
 - The reply equals the stored outcome, and the stored outcome is what later
   replays return [S01, C27].
 - Same id with different content, or with another operation name, is refused
   without writing and without becoming terminal [S04, S05, U06]. Object key
   order does not matter [S06, K01, U02].
 - Ids are scoped per actor: two users can never replay or block each other's
-  requests [S07, U01, C20].
+  requests [S07, U01, C20]; actor isolation across tabs ensures switching users
+  in one tab is unaffected by pending slots of another user in another tab [B09].
 - Definite refusals are stored and replayed as terminal. Refusals raised after
   writes were staged commit none of them [S08, S09, S12].
 - Non-definite errors store nothing, so the same id can still succeed. Only the
@@ -118,16 +122,17 @@ are in brackets.
 - The tracker saves before sending and always sends the complete stored request
   [C01, C02]. If the request cannot be saved, it is not sent [C03, C04, C25].
 - After a lost response, the request survives a reload. A same-id retry or
-  `check()` recovers the outcome [C05, C06, E2, E3].
+  `check()` recovers the outcome [C05, C06, E2, E3, B02].
 - A retry refused by sign-in or permission stays unconfirmed [C07, E4]. Only a
   terminal rejection for the same id settles it [C08, C09, W02].
 - Late errors, late successes, contradicting late replies and stale unsaved
   changes from other tabs cannot override a settled or removed request
   [C10–C13, C16, C28]. With per-tab storage caches that lag behind (each tab
   reads its own copy): a late error from a tab with an old view does not undo a
-  result [X1]; two settled answers racing converge on the first [X2]; late
+  result [X1, B06]; two settled answers racing converge on the first [X2]; late
   writes around the expiry of a removal marker do not bring the request back
-  [X3, X4]; attempt counts from several tabs are not lost [X5]; pruning from a
+  [X3, X4]; cross-tab discard prevents resurrection when a late completed reply
+  arrives [B07]; attempt counts from several tabs are not lost [X5]; pruning from a
   view that shows a result before its request keeps the result [X6].
 - Another tab changing storage while keys are listed: pruning does not delete a
   result whose request record the listing skipped [R1]; `submit` does not open
@@ -148,7 +153,9 @@ are in brackets.
   a later read misses the outcome [R11]. The slot record: one damaged copy is
   restored from the other; both unusable keep the slot blocked, also after
   `discardBroken()`, until `resetSlot()`; the two copies are combined;
-  unreadable or unsaved copies send nothing [R8]. It keeps settled requests
+  unreadable or unsaved copies send nothing [R8], also verified end to end in the
+  browser against corrupt localStorage slot records where new sends are blocked
+  until `resetSlot()` recovers the slot [E8, B10]. It keeps settled requests
   that are not acknowledged and drops removed ones [R9]; a skipped request
   whose direct read fails is refused [R10]; a damaged slot record followed by
   `discardBroken()` and listings that skip everything of the old request runs
@@ -163,11 +170,15 @@ are in brackets.
   end to end against the emulator for no cleanup, cleanup first, and cleanup
   in the middle of the check [E9]. Without locks, another tab's whole submit
   between two reads of this tab's submit runs only one request, and the slot
-  record still lists it [R17].
-- Cross-tab visibility and notifications [C14]. Storage failure after sending
-  [C15]. Slot rules [C17]. Same-tab double submit sends once [C18].
-  Unmount/user switch before sending [C19]. Unreadable entries [C21]. Lock
-  usage [C22].
+  record still lists it [R17]; concurrent same-content submit across two tabs
+  serializes via native Web Locks into a single execution and ledger record [B04].
+- Cross-tab visibility and notifications [C14, B03]. Storage failure after sending
+  [C15]. Slot rules [C17]; concurrent different-content submit across two tabs
+  blocks the second tab with slot-busy [B05]. Same-tab double submit sends once
+  [C18]. Unmount/user switch before sending [C19]. Unreadable entries [C21]. Lock
+  usage [C22]; abrupt tab close while holding a Web Lock releases the lock cleanly
+  for remaining tabs, allowing pending tabs to proceed and recover unconfirmed
+  requests [B08].
 
 ## What is not covered (limitations)
 
@@ -223,14 +234,20 @@ are in brackets.
 - A reply that arrives after the request was removed (or after `localStorage`
   was cleared) is returned to that call but not stored, so it never reappears
   in `list()`.
-- The cross-tab tests model each tab's view of `localStorage` as a cache that
-  can lag behind; single storage operations are atomic in the model. Real
-  browsers are not driven by these tests.
+- The cross-tab unit tests (`test/unit`) model each tab's view of `localStorage`
+  as a cache that can lag behind; single storage operations are atomic in the
+  model. Real browser behavior is verified separately in `test/browser`.
+- **Browser automation coverage and boundaries**: The browser E2E tests (`test/browser`,
+  cases `B01`–`B10`) drive the example application across multiple tabs using
+  Playwright in headless Chromium against the local Firestore emulator, verifying
+  real `localStorage`, native cross-tab `storage` events, and Web Locks
+  (`navigator.locks`). They do not cover Firefox, WebKit, or mobile browsers.
+  In `B10`, slot recovery is exercised by dynamically importing the built client
+  API to call `resetSlot()`, rather than through a dedicated end-user recovery UI.
+  Tests run against the local emulator; production Firestore latency, network
+  partitions, and catastrophic browser crashes remain outside this suite.
 - Not exercised by the automated tests: the `firebase-admin` Firestore
-  instance (the same class, re-exported), named databases, production latency,
-  and real browsers. The tracker is tested with in-memory Storage/Locks doubles
-  (a manual spot check in Chrome was done outside this repository). The example
-  UI is built and served, but no browser automation drives it.
+  instance (the same class, re-exported), named databases, and production latency.
 
 ## Requirements
 
@@ -239,8 +256,8 @@ Using the package:
 - ES modules only, imported from the subpaths `firestore-request-ledger/server`,
   `/client` and `/wire` (there is no root entry point). The code is ES2022.
 - Server part: tested on Node.js 22 with `@google-cloud/firestore`.
-- Client part: a browser with Web Storage; Web Locks when available. The
-  automated tests use in-memory doubles (see the limitations above).
+- Client part: a browser with Web Storage; Web Locks when available. Unit tests
+  use in-memory doubles; browser E2E tests drive real headless Chromium.
 
 Developing the library:
 
