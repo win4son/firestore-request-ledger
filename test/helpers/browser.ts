@@ -89,7 +89,7 @@ function serveStaticFile(baseDir: string, relativePath: string, response: Server
     return true;
 }
 
-async function waitForAppReady(page: Page): Promise<void> {
+export async function waitForAppReady(page: Page): Promise<void> {
     await page.locator('form').waitFor({ state: 'visible', timeout: 10_000 });
     await page.locator('button[type="submit"]').waitFor({ state: 'visible', timeout: 10_000 });
     await page.locator('strong.figure').waitFor({ state: 'visible', timeout: 10_000 });

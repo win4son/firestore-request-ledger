@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import type { Locator, Page } from 'playwright';
-import { createBrowserE2EHarness, createDeferred } from '../helpers/browser.ts';
+import { createBrowserE2EHarness, createDeferred, waitForAppReady } from '../helpers/browser.ts';
 import type { BrowserE2EHarness } from '../helpers/browser.ts';
 
 let harness: BrowserE2EHarness;
@@ -34,15 +34,6 @@ async function waitForStatusText(page: Page, pattern: RegExp): Promise<string> {
     const statusLocator = page.locator('.status');
     await statusLocator.filter({ hasText: pattern }).waitFor({ state: 'visible', timeout: 10_000 });
     return (await statusLocator.textContent()) ?? '';
-}
-
-/**
- * 等待應用程式就緒（表單與餘額皆載入完成）。
- */
-async function waitForAppReady(page: Page): Promise<void> {
-    await page.locator('form').waitFor({ state: 'visible', timeout: 10_000 });
-    await page.locator('button[type="submit"]').waitFor({ state: 'visible', timeout: 10_000 });
-    await page.locator('strong.figure').waitFor({ state: 'visible', timeout: 10_000 });
 }
 
 /**
