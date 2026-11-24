@@ -197,12 +197,13 @@ export async function createBrowserE2EHarness(): Promise<BrowserE2EHarness> {
         };
 
         let context: BrowserContext | undefined;
+        let tracingStarted = false;
         let testError: unknown = null;
-        let contextClosed = false;
 
         try {
             context = await browser.newContext();
             await context.tracing.start({ screenshots: true, snapshots: true });
+            tracingStarted = true;
 
             const pageA = await context.newPage();
             const pageB = await context.newPage();
@@ -221,32 +222,32 @@ export async function createBrowserE2EHarness(): Promise<BrowserE2EHarness> {
             await run({ context, pageA, pageB, baseUrl, db, prefix, getAccountState });
         } catch (error) {
             testError = error;
-            if (context) {
+            if (context && tracingStarted) {
                 try {
                     mkdirSync(TRACE_OUT_DIR, { recursive: true });
                     const safeLabel = label.replace(/[^a-zA-Z0-9_-]/g, '_');
                     const uniqueSuffix = randomUUID().replace(/-/g, '').slice(0, 8);
                     await context.tracing.stop({ path: resolve(TRACE_OUT_DIR, `${safeLabel}-${uniqueSuffix}.zip`) });
+                    tracingStarted = false;
                 } catch (traceError) {
                     // Trace 匯出失敗不得掩蓋原始測試錯誤
                     console.error('Failed to export trace:', traceError);
                 }
             }
         } finally {
-            if (!testError && !contextClosed && context) {
+            if (context && tracingStarted) {
                 try {
                     await context.tracing.stop();
                 } catch {
                     // ignore
                 }
             }
-            if (!contextClosed && context) {
+            if (context) {
                 try {
                     await context.close();
                 } catch {
                     // ignore
                 }
-                contextClosed = true;
             }
 
             server.closeAllConnections();
