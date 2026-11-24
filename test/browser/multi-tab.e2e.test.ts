@@ -293,150 +293,141 @@ test('B05 concurrent different-content submit across two tabs: second tab is blo
     });
 });
 
-test('B06 late network failure in tab A does not revert settled outcome confirmed by tab B', { timeout: 30_000 }, async () => {
-    await harness!.withMultiTabSession('B06', async ({ pageA, pageB, getAccountState }) => {
-        const before = await getAccountState('demo-user-a');
-        const committedOnServer = createDeferred<void>();
-        const releaseAbort = createDeferred<void>();
+test(
+    'B06 late network failure in tab A does not revert settled outcome confirmed by tab B',
+    { timeout: 30_000 },
+    async () => {
+        await harness!.withMultiTabSession('B06', async ({ pageA, pageB, getAccountState }) => {
+            const before = await getAccountState('demo-user-a');
+            const committedOnServer = createDeferred<void>();
+            const releaseAbort = createDeferred<void>();
 
-        let submittedRequestId = '';
-        await pageA.route('**/api/execute', async (route) => {
-            const data = route.request().postDataJSON() as { requestId?: string } | null;
-            submittedRequestId = data?.requestId ?? '';
-            await route.fetch();
-            committedOnServer.resolve();
-            await releaseAbort.promise;
-            await route.abort('timedout');
-        });
-
-        try {
-            const submitA = fillAndSubmit(pageA, 25, 'b06-late-fail');
-            await committedOnServer.promise;
-            assert.ok(submittedRequestId.length >= 8);
-
-            // 分頁 B 觀察到未確認紀錄，點擊 Check status 確認為 completed
-            const entryInB = entryByRequestId(pageB, submittedRequestId);
-            await entryInB.locator('.badge.unconfirmed').waitFor({ state: 'visible', timeout: 5_000 });
-
-            const checkButtonInB = entryInB.getByRole('button', { name: 'Check status' });
-            await checkButtonInB.click();
-            await waitForStatusText(pageB, /completed/i);
-            await entryInB.locator('.badge.completed').waitFor({ state: 'visible', timeout: 5_000 });
-
-            // 設置可觀測的前端處理完成訊號：
-            // 1. 監聽 pageA 的 requestfailed 事件（網路層連線中斷）
-            const requestFailedPromise = pageA.waitForEvent('requestfailed', {
-                predicate: (req) => req.url().includes('/api/execute'),
+            let submittedRequestId = '';
+            await pageA.route('**/api/execute', async (route) => {
+                const data = route.request().postDataJSON() as { requestId?: string } | null;
+                submittedRequestId = data?.requestId ?? '';
+                await route.fetch();
+                committedOnServer.resolve();
+                await releaseAbort.promise;
+                await route.abort('timedout');
             });
 
-            // 放行分頁 A 的連線中斷（逾時錯誤）
-            releaseAbort.resolve();
-            await submitA;
-            await requestFailedPromise;
+            try {
+                await fillAndSubmit(pageA, 25, 'b06-late-fail');
+                await committedOnServer.promise;
+                assert.ok(submittedRequestId.length >= 8);
 
-            // 2. 等待分頁 A 完成遲到錯誤的狀態機處理，表單送出按鈕恢復為可用狀態且狀態區更新
-            await pageA.locator('button[type="submit"]:not([disabled])').waitFor({ state: 'visible', timeout: 10_000 });
-            await waitForStatusText(pageA, /completed/i);
+                // 分頁 B 觀察到未確認紀錄並查詢確認為 completed
+                const entryInB = entryByRequestId(pageB, submittedRequestId);
+                await entryInB.locator('.badge.unconfirmed').waitFor({ state: 'visible', timeout: 5_000 });
+                await entryInB.getByRole('button', { name: 'Check status' }).click();
+                await waitForStatusText(pageB, /completed/i);
+                await entryInB.locator('.badge.completed').waitFor({ state: 'visible', timeout: 5_000 });
 
-            // 驗證分頁 A 的未確認紀錄不會因為連線逾時覆蓋已定案狀態，依然為 completed
-            const entryInA = entryByRequestId(pageA, submittedRequestId);
-            await entryInA.locator('.badge.completed').waitFor({ state: 'visible', timeout: 5_000 });
-            assert.equal(await pageA.locator('.badge.unconfirmed').count(), 0);
+                // 先註冊網路中斷事件監聽，再放行分頁 A 的逾時錯誤
+                const requestFailed = pageA.waitForEvent('requestfailed', {
+                    predicate: (req) => req.url().includes('/api/execute'),
+                    timeout: 10_000,
+                });
+                releaseAbort.resolve();
+                await requestFailed;
 
-            // 直接讀取 localStorage 驗證持久化紀錄未被降級
-            const storageCheck = await pageA.evaluate((reqId) => {
-                const keys = Object.keys(window.localStorage);
-                const entryKey = `frl-demo/v1/entry/demo-user-a/${reqId}`;
-                const doneKeys = keys.filter((k) => k.startsWith(`frl-demo/v1/done/demo-user-a/${reqId}`));
-                const doneValues = doneKeys.map((k) => JSON.parse(window.localStorage.getItem(k) ?? '{}') as { state?: string });
-                return {
-                    hasEntry: window.localStorage.getItem(entryKey) !== null,
-                    hasCompletedDone: doneValues.some((d) => d.state === 'completed'),
-                };
-            }, submittedRequestId);
-            assert.ok(storageCheck.hasEntry, 'Entry must exist in localStorage');
-            assert.ok(storageCheck.hasCompletedDone, 'LocalStorage done record must remain completed');
+                // 等待分頁 A 前端狀態機完成錯誤處理（表單退出 busy、送出按鈕恢復可用）
+                await pageA.locator('button[type="submit"]:not([disabled])').waitFor({ state: 'visible', timeout: 10_000 });
+                await waitForStatusText(pageA, /completed/i);
 
-            const afterwards = await getAccountState('demo-user-a');
-            assert.equal(afterwards.balance, before.balance + 25);
-            assert.equal(afterwards.entries, before.entries + 1);
-        } finally {
-            committedOnServer.resolve();
-            releaseAbort.resolve();
-        }
-    });
-});
+                // 驗證分頁 A UI 與 localStorage 皆維持 completed，未被降級
+                const entryInA = entryByRequestId(pageA, submittedRequestId);
+                await entryInA.locator('.badge.completed').waitFor({ state: 'visible', timeout: 5_000 });
+                assert.equal(await pageA.locator('.badge.unconfirmed').count(), 0);
 
-test('B07 cross-tab discard prevents resurrection when a late completed reply arrives', { timeout: 30_000 }, async () => {
-    await harness!.withMultiTabSession('B07', async ({ pageA, pageB, getAccountState }) => {
-        const before = await getAccountState('demo-user-a');
-        const committedOnServer = createDeferred<void>();
-        const releaseLateReply = createDeferred<void>();
+                const storageCheck = await pageA.evaluate((reqId) => {
+                    const keys = Object.keys(window.localStorage);
+                    const entryKey = `frl-demo/v1/entry/demo-user-a/${reqId}`;
+                    const doneKeys = keys.filter((k) => k.startsWith(`frl-demo/v1/done/demo-user-a/${reqId}`));
+                    const doneValues = doneKeys.map((k) => JSON.parse(window.localStorage.getItem(k) ?? '{}') as { state?: string });
+                    return {
+                        hasEntry: window.localStorage.getItem(entryKey) !== null,
+                        hasCompletedDone: doneValues.some((d) => d.state === 'completed'),
+                    };
+                }, submittedRequestId);
+                assert.ok(storageCheck.hasEntry, 'Entry must exist in localStorage');
+                assert.ok(storageCheck.hasCompletedDone, 'LocalStorage done record must remain completed');
 
-        let submittedReqId = '';
-        await pageA.route('**/api/execute', async (route) => {
-            const data = route.request().postDataJSON() as { requestId?: string } | null;
-            submittedReqId = data?.requestId ?? '';
-            const response = await route.fetch();
-            committedOnServer.resolve();
-            await releaseLateReply.promise;
-            await route.fulfill({ response });
+                const afterwards = await getAccountState('demo-user-a');
+                assert.equal(afterwards.balance, before.balance + 25);
+                assert.equal(afterwards.entries, before.entries + 1);
+            } finally {
+                releaseAbort.resolve();
+            }
         });
+    },
+);
 
-        try {
-            const submitA = fillAndSubmit(pageA, 30, 'b07-discard-race');
-            await committedOnServer.promise;
-            assert.ok(submittedReqId.length >= 8);
+test(
+    'B07 cross-tab discard prevents resurrection when a late completed reply arrives',
+    { timeout: 30_000 },
+    async () => {
+        await harness!.withMultiTabSession('B07', async ({ pageA, pageB, getAccountState }) => {
+            const before = await getAccountState('demo-user-a');
+            const committedOnServer = createDeferred<void>();
+            const releaseLateReply = createDeferred<void>();
 
-            // 分頁 B 觀察到未確認紀錄，點擊 Discard 丟棄
-            const entryInB = entryByRequestId(pageB, submittedReqId);
-            await entryInB.locator('.badge.unconfirmed').waitFor({ state: 'visible', timeout: 5_000 });
-
-            pageB.once('dialog', (dialog) => dialog.accept());
-            await entryInB.getByRole('button', { name: 'Discard' }).click();
-            await entryInB.waitFor({ state: 'detached', timeout: 5_000 });
-
-            // 先確認分頁 A 已透過 storage 事件觀察到該 requestId 從列表移除
-            const entryInA = entryByRequestId(pageA, submittedReqId);
-            await entryInA.waitFor({ state: 'detached', timeout: 5_000 });
-
-            // 設置可觀測的前端處理完成訊號：
-            // 1. 監聽 pageA 收到 response 事件
-            const responsePromise = pageA.waitForEvent('response', {
-                predicate: (res) => res.url().includes('/api/execute'),
+            let submittedReqId = '';
+            await pageA.route('**/api/execute', async (route) => {
+                const data = route.request().postDataJSON() as { requestId?: string } | null;
+                submittedReqId = data?.requestId ?? '';
+                const response = await route.fetch();
+                committedOnServer.resolve();
+                await releaseLateReply.promise;
+                await route.fulfill({ response });
             });
 
-            // 再放行分頁 A 遲到的 completed 回應
-            releaseLateReply.resolve();
-            await submitA;
-            await responsePromise;
+            try {
+                await fillAndSubmit(pageA, 30, 'b07-discard-race');
+                await committedOnServer.promise;
+                assert.ok(submittedReqId.length >= 8);
 
-            // 2. 等待分頁 A 完成遲到回應的前端處理（busy 解除，按鈕回到可用狀態）
-            await pageA.locator('button[type="submit"]:not([disabled])').waitFor({ state: 'visible', timeout: 10_000 });
-            await waitForStatusText(pageA, /completed/i);
+                // 分頁 B 丟棄該筆未確認紀錄
+                const entryInB = entryByRequestId(pageB, submittedReqId);
+                await entryInB.locator('.badge.unconfirmed').waitFor({ state: 'visible', timeout: 5_000 });
+                pageB.once('dialog', (dialog) => dialog.accept());
+                await entryInB.getByRole('button', { name: 'Discard' }).click();
+                await entryInB.waitFor({ state: 'detached', timeout: 5_000 });
 
-            // 驗證分頁 A 完成回應處理後紀錄未復活
-            assert.equal(await entryByRequestId(pageA, submittedReqId).count(), 0);
+                // 先確認分頁 A 已透過 storage 事件觀察到紀錄移除
+                const entryInA = entryByRequestId(pageA, submittedReqId);
+                await entryInA.waitFor({ state: 'detached', timeout: 5_000 });
 
-            // 重新整理兩分頁，驗證紀錄依然保持已移除狀態
-            await pageA.reload({ waitUntil: 'networkidle' });
-            await pageB.reload({ waitUntil: 'networkidle' });
-            await waitForAppReady(pageA);
-            await waitForAppReady(pageB);
+                // 先註冊 HTTP 回應監聽，再放行遲到的 completed 回應
+                const lateResponse = pageA.waitForEvent('response', {
+                    predicate: (res) => res.url().includes('/api/execute'),
+                    timeout: 10_000,
+                });
+                releaseLateReply.resolve();
+                await lateResponse;
 
-            assert.equal(await entryByRequestId(pageA, submittedReqId).count(), 0);
-            assert.equal(await entryByRequestId(pageB, submittedReqId).count(), 0);
+                // 等待分頁 A 前端狀態機消化完遲到回應（表單退出 busy、送出按鈕重新啟用）
+                await pageA.locator('button[type="submit"]:not([disabled])').waitFor({ state: 'visible', timeout: 10_000 });
 
-            // 後端交易已提交的餘額維持不變（客戶端丟棄不影響後端已提交資料）
-            const afterwards = await getAccountState('demo-user-a');
-            assert.equal(afterwards.balance, before.balance + 30);
-            assert.equal(afterwards.entries, before.entries + 1);
-        } finally {
-            committedOnServer.resolve();
-            releaseLateReply.resolve();
-        }
-    });
-});
+                // 驗證紀錄未復活，且雙分頁重整後仍保持已移除
+                assert.equal(await entryByRequestId(pageA, submittedReqId).count(), 0);
+                await pageA.reload({ waitUntil: 'networkidle' });
+                await pageB.reload({ waitUntil: 'networkidle' });
+                await waitForAppReady(pageA);
+                await waitForAppReady(pageB);
+                assert.equal(await entryByRequestId(pageA, submittedReqId).count(), 0);
+                assert.equal(await entryByRequestId(pageB, submittedReqId).count(), 0);
+
+                const afterwards = await getAccountState('demo-user-a');
+                assert.equal(afterwards.balance, before.balance + 30);
+                assert.equal(afterwards.entries, before.entries + 1);
+            } finally {
+                releaseLateReply.resolve();
+            }
+        });
+    },
+);
 
 test('B08 abrupt tab close while holding Web Lock releases lock cleanly for remaining tabs', { timeout: 30_000 }, async () => {
     await harness!.withMultiTabSession('B08', async ({ context, pageA, pageB, baseUrl, getAccountState }) => {
