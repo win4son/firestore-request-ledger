@@ -4,14 +4,14 @@ import type { Locator, Page } from 'playwright';
 import { createBrowserE2EHarness, createDeferred, waitForAppReady } from '../helpers/browser.ts';
 import type { BrowserE2EHarness } from '../helpers/browser.ts';
 
-let harness: BrowserE2EHarness;
+let harness: BrowserE2EHarness | undefined;
 
 before(async () => {
     harness = await createBrowserE2EHarness();
 });
 
 after(async () => {
-    await harness.close();
+    await harness?.close();
 });
 
 /**
@@ -64,8 +64,8 @@ async function getLatestEntryRequestId(page: Page): Promise<string> {
     return title ?? '';
 }
 
-test('B01 single-tab normal submit and acknowledge: commits once and clears acknowledged entry', async () => {
-    await harness.withMultiTabSession('B01', async ({ pageA, getAccountState }) => {
+test('B01 single-tab normal submit and acknowledge: commits once and clears acknowledged entry', { timeout: 30_000 }, async () => {
+    await harness!.withMultiTabSession('B01', async ({ pageA, getAccountState }) => {
         const beforeBackend = await getAccountState('demo-user-a');
         const beforeFrontend = await getFrontendBalance(pageA);
         assert.equal(beforeFrontend, beforeBackend.balance, 'Initial frontend balance matches backend');
@@ -97,8 +97,8 @@ test('B01 single-tab normal submit and acknowledge: commits once and clears ackn
     });
 });
 
-test('B02 dropped response after server commit, reload, then same-id retry: replays without double execution', async () => {
-    await harness.withMultiTabSession('B02', async ({ pageA, getAccountState }) => {
+test('B02 dropped response after server commit, reload, then same-id retry: replays without double execution', { timeout: 30_000 }, async () => {
+    await harness!.withMultiTabSession('B02', async ({ pageA, getAccountState }) => {
         const before = await getAccountState('demo-user-a');
 
         let droppedRequestId = '';
@@ -159,8 +159,8 @@ test('B02 dropped response after server commit, reload, then same-id retry: repl
     });
 });
 
-test('B03 cross-tab live visibility via native storage event and recovery from second tab', async () => {
-    await harness.withMultiTabSession('B03', async ({ pageA, pageB, getAccountState }) => {
+test('B03 cross-tab live visibility via native storage event and recovery from second tab', { timeout: 30_000 }, async () => {
+    await harness!.withMultiTabSession('B03', async ({ pageA, pageB, getAccountState }) => {
         const before = await getAccountState('demo-user-a');
 
         let originalRequestId = '';
@@ -199,8 +199,8 @@ test('B03 cross-tab live visibility via native storage event and recovery from s
     });
 });
 
-test('B04 concurrent same-content submit across two tabs: native Web Locks serializes into one execution', async () => {
-    await harness.withMultiTabSession('B04', async ({ context, pageA, pageB, getAccountState }) => {
+test('B04 concurrent same-content submit across two tabs: native Web Locks serializes into one execution', { timeout: 30_000 }, async () => {
+    await harness!.withMultiTabSession('B04', async ({ context, pageA, pageB, getAccountState }) => {
         const before = await getAccountState('demo-user-a');
         let executeRequests = 0;
         const tabACommitted = createDeferred<void>();
@@ -214,42 +214,47 @@ test('B04 concurrent same-content submit across two tabs: native Web Locks seria
             await route.fulfill({ response });
         });
 
-        await pageA.locator('input[type="number"]').fill('15');
-        await pageA.locator('input[type="text"]').fill('b04-concurrent-same');
-        await pageB.locator('input[type="number"]').fill('15');
-        await pageB.locator('input[type="text"]').fill('b04-concurrent-same');
+        try {
+            await pageA.locator('input[type="number"]').fill('15');
+            await pageA.locator('input[type="text"]').fill('b04-concurrent-same');
+            await pageB.locator('input[type="number"]').fill('15');
+            await pageB.locator('input[type="text"]').fill('b04-concurrent-same');
 
-        // 分頁 A 先送出，並等待後端已完成交易提交但尚未收到回應
-        const submitA = pageA.getByRole('button', { name: 'Submit' }).click();
-        await tabACommitted.promise;
+            // 分頁 A 先送出，並等待後端已完成交易提交但尚未收到回應
+            const submitA = pageA.getByRole('button', { name: 'Submit' }).click();
+            await tabACommitted.promise;
 
-        // 分頁 B 此時送出相同內容（透過 Web Locks 讀取相同 slot 與 requestId）
-        const submitB = pageB.getByRole('button', { name: 'Submit' }).click();
+            // 分頁 B 此時送出相同內容（透過 Web Locks 讀取相同 slot 與 requestId）
+            const submitB = pageB.getByRole('button', { name: 'Submit' }).click();
 
-        // 隨即放行分頁 A 回應，使其將 completed 寫入 storage
-        releaseTabAResponse.resolve();
+            // 隨即放行分頁 A 回應，使其將 completed 寫入 storage
+            releaseTabAResponse.resolve();
 
-        await Promise.all([submitA, submitB]);
+            await Promise.all([submitA, submitB]);
 
-        // 兩分頁均順利完成
-        await Promise.all([
-            waitForStatusText(pageA, /completed/i),
-            waitForStatusText(pageB, /completed/i),
-        ]);
+            // 兩分頁均順利完成
+            await Promise.all([
+                waitForStatusText(pageA, /completed/i),
+                waitForStatusText(pageB, /completed/i),
+            ]);
 
-        const reqA = await getLatestEntryRequestId(pageA);
-        const reqB = await getLatestEntryRequestId(pageB);
-        assert.equal(reqA, reqB, 'Both tabs must share the exact same requestId');
-        assert.equal(executeRequests, 1, 'Web Locks deduplication ensures only 1 HTTP request is sent');
+            const reqA = await getLatestEntryRequestId(pageA);
+            const reqB = await getLatestEntryRequestId(pageB);
+            assert.equal(reqA, reqB, 'Both tabs must share the exact same requestId');
+            assert.equal(executeRequests, 1, 'Web Locks deduplication ensures only 1 HTTP request is sent');
 
-        const afterwards = await getAccountState('demo-user-a');
-        assert.equal(afterwards.balance, before.balance + 15, 'Backend commits exactly once');
-        assert.equal(afterwards.entries, before.entries + 1);
+            const afterwards = await getAccountState('demo-user-a');
+            assert.equal(afterwards.balance, before.balance + 15, 'Backend commits exactly once');
+            assert.equal(afterwards.entries, before.entries + 1);
+        } finally {
+            tabACommitted.resolve();
+            releaseTabAResponse.resolve();
+        }
     });
 });
 
-test('B05 concurrent different-content submit across two tabs: second tab is blocked with slot-busy', async () => {
-    await harness.withMultiTabSession('B05', async ({ pageA, pageB, getAccountState }) => {
+test('B05 concurrent different-content submit across two tabs: second tab is blocked with slot-busy', { timeout: 30_000 }, async () => {
+    await harness!.withMultiTabSession('B05', async ({ pageA, pageB, getAccountState }) => {
         const before = await getAccountState('demo-user-a');
         const requestStarted = createDeferred<void>();
         const allowFinish = createDeferred<void>();
@@ -276,6 +281,7 @@ test('B05 concurrent different-content submit across two tabs: second tab is blo
             assert.equal(pageBNetworkCalls, 0, 'Tab B must not send any network request while slot is busy');
         } finally {
             // 無論測試成敗，皆確保閘門放行，防止懸掛
+            requestStarted.resolve();
             allowFinish.resolve();
         }
 
@@ -287,8 +293,8 @@ test('B05 concurrent different-content submit across two tabs: second tab is blo
     });
 });
 
-test('B06 late network failure in tab A does not revert settled outcome confirmed by tab B', async () => {
-    await harness.withMultiTabSession('B06', async ({ pageA, pageB, getAccountState }) => {
+test('B06 late network failure in tab A does not revert settled outcome confirmed by tab B', { timeout: 30_000 }, async () => {
+    await harness!.withMultiTabSession('B06', async ({ pageA, pageB, getAccountState }) => {
         const before = await getAccountState('demo-user-a');
         const committedOnServer = createDeferred<void>();
         const releaseAbort = createDeferred<void>();
@@ -303,50 +309,66 @@ test('B06 late network failure in tab A does not revert settled outcome confirme
             await route.abort('timedout');
         });
 
-        const submitA = fillAndSubmit(pageA, 25, 'b06-late-fail');
-        await committedOnServer.promise;
-        assert.ok(submittedRequestId.length >= 8);
+        try {
+            const submitA = fillAndSubmit(pageA, 25, 'b06-late-fail');
+            await committedOnServer.promise;
+            assert.ok(submittedRequestId.length >= 8);
 
-        // 分頁 B 觀察到未確認紀錄，點擊 Check status 確認為 completed
-        const entryInB = entryByRequestId(pageB, submittedRequestId);
-        await entryInB.locator('.badge.unconfirmed').waitFor({ state: 'visible', timeout: 5_000 });
+            // 分頁 B 觀察到未確認紀錄，點擊 Check status 確認為 completed
+            const entryInB = entryByRequestId(pageB, submittedRequestId);
+            await entryInB.locator('.badge.unconfirmed').waitFor({ state: 'visible', timeout: 5_000 });
 
-        const checkButtonInB = entryInB.getByRole('button', { name: 'Check status' });
-        await checkButtonInB.click();
-        await waitForStatusText(pageB, /completed/i);
-        await entryInB.locator('.badge.completed').waitFor({ state: 'visible', timeout: 5_000 });
+            const checkButtonInB = entryInB.getByRole('button', { name: 'Check status' });
+            await checkButtonInB.click();
+            await waitForStatusText(pageB, /completed/i);
+            await entryInB.locator('.badge.completed').waitFor({ state: 'visible', timeout: 5_000 });
 
-        // 放行分頁 A 的連線中斷（逾時錯誤）
-        releaseAbort.resolve();
-        await submitA;
+            // 設置可觀測的前端處理完成訊號：
+            // 1. 監聽 pageA 的 requestfailed 事件（網路層連線中斷）
+            const requestFailedPromise = pageA.waitForEvent('requestfailed', {
+                predicate: (req) => req.url().includes('/api/execute'),
+            });
 
-        // 驗證分頁 A 的未確認紀錄不會因為連線逾時覆蓋已定案狀態，依然為 completed
-        const entryInA = entryByRequestId(pageA, submittedRequestId);
-        await entryInA.locator('.badge.completed').waitFor({ state: 'visible', timeout: 5_000 });
-        assert.equal(await pageA.locator('.badge.unconfirmed').count(), 0);
+            // 放行分頁 A 的連線中斷（逾時錯誤）
+            releaseAbort.resolve();
+            await submitA;
+            await requestFailedPromise;
 
-        // 直接讀取 localStorage 驗證持久化紀錄未被降級
-        const storageCheck = await pageA.evaluate((reqId) => {
-            const keys = Object.keys(window.localStorage);
-            const entryKey = `frl-demo/v1/entry/demo-user-a/${reqId}`;
-            const doneKeys = keys.filter((k) => k.startsWith(`frl-demo/v1/done/demo-user-a/${reqId}`));
-            const doneValues = doneKeys.map((k) => JSON.parse(window.localStorage.getItem(k) ?? '{}') as { state?: string });
-            return {
-                hasEntry: window.localStorage.getItem(entryKey) !== null,
-                hasCompletedDone: doneValues.some((d) => d.state === 'completed'),
-            };
-        }, submittedRequestId);
-        assert.ok(storageCheck.hasEntry, 'Entry must exist in localStorage');
-        assert.ok(storageCheck.hasCompletedDone, 'LocalStorage done record must remain completed');
+            // 2. 等待分頁 A 完成遲到錯誤的狀態機處理，表單送出按鈕恢復為可用狀態且狀態區更新
+            await pageA.locator('button[type="submit"]:not([disabled])').waitFor({ state: 'visible', timeout: 10_000 });
+            await waitForStatusText(pageA, /completed/i);
 
-        const afterwards = await getAccountState('demo-user-a');
-        assert.equal(afterwards.balance, before.balance + 25);
-        assert.equal(afterwards.entries, before.entries + 1);
+            // 驗證分頁 A 的未確認紀錄不會因為連線逾時覆蓋已定案狀態，依然為 completed
+            const entryInA = entryByRequestId(pageA, submittedRequestId);
+            await entryInA.locator('.badge.completed').waitFor({ state: 'visible', timeout: 5_000 });
+            assert.equal(await pageA.locator('.badge.unconfirmed').count(), 0);
+
+            // 直接讀取 localStorage 驗證持久化紀錄未被降級
+            const storageCheck = await pageA.evaluate((reqId) => {
+                const keys = Object.keys(window.localStorage);
+                const entryKey = `frl-demo/v1/entry/demo-user-a/${reqId}`;
+                const doneKeys = keys.filter((k) => k.startsWith(`frl-demo/v1/done/demo-user-a/${reqId}`));
+                const doneValues = doneKeys.map((k) => JSON.parse(window.localStorage.getItem(k) ?? '{}') as { state?: string });
+                return {
+                    hasEntry: window.localStorage.getItem(entryKey) !== null,
+                    hasCompletedDone: doneValues.some((d) => d.state === 'completed'),
+                };
+            }, submittedRequestId);
+            assert.ok(storageCheck.hasEntry, 'Entry must exist in localStorage');
+            assert.ok(storageCheck.hasCompletedDone, 'LocalStorage done record must remain completed');
+
+            const afterwards = await getAccountState('demo-user-a');
+            assert.equal(afterwards.balance, before.balance + 25);
+            assert.equal(afterwards.entries, before.entries + 1);
+        } finally {
+            committedOnServer.resolve();
+            releaseAbort.resolve();
+        }
     });
 });
 
-test('B07 cross-tab discard prevents resurrection when a late completed reply arrives', async () => {
-    await harness.withMultiTabSession('B07', async ({ pageA, pageB, getAccountState }) => {
+test('B07 cross-tab discard prevents resurrection when a late completed reply arrives', { timeout: 30_000 }, async () => {
+    await harness!.withMultiTabSession('B07', async ({ pageA, pageB, getAccountState }) => {
         const before = await getAccountState('demo-user-a');
         const committedOnServer = createDeferred<void>();
         const releaseLateReply = createDeferred<void>();
@@ -361,135 +383,158 @@ test('B07 cross-tab discard prevents resurrection when a late completed reply ar
             await route.fulfill({ response });
         });
 
-        const submitA = fillAndSubmit(pageA, 30, 'b07-discard-race');
-        await committedOnServer.promise;
-        assert.ok(submittedReqId.length >= 8);
+        try {
+            const submitA = fillAndSubmit(pageA, 30, 'b07-discard-race');
+            await committedOnServer.promise;
+            assert.ok(submittedReqId.length >= 8);
 
-        // 分頁 B 觀察到未確認紀錄，點擊 Discard 丟棄
-        const entryInB = entryByRequestId(pageB, submittedReqId);
-        await entryInB.locator('.badge.unconfirmed').waitFor({ state: 'visible', timeout: 5_000 });
+            // 分頁 B 觀察到未確認紀錄，點擊 Discard 丟棄
+            const entryInB = entryByRequestId(pageB, submittedReqId);
+            await entryInB.locator('.badge.unconfirmed').waitFor({ state: 'visible', timeout: 5_000 });
 
-        pageB.once('dialog', (dialog) => dialog.accept());
-        await entryInB.getByRole('button', { name: 'Discard' }).click();
-        await entryInB.waitFor({ state: 'detached', timeout: 5_000 });
+            pageB.once('dialog', (dialog) => dialog.accept());
+            await entryInB.getByRole('button', { name: 'Discard' }).click();
+            await entryInB.waitFor({ state: 'detached', timeout: 5_000 });
 
-        // 先確認分頁 A 已透過 storage 事件觀察到該 requestId 從列表移除
-        const entryInA = entryByRequestId(pageA, submittedReqId);
-        await entryInA.waitFor({ state: 'detached', timeout: 5_000 });
+            // 先確認分頁 A 已透過 storage 事件觀察到該 requestId 從列表移除
+            const entryInA = entryByRequestId(pageA, submittedReqId);
+            await entryInA.waitFor({ state: 'detached', timeout: 5_000 });
 
-        // 再放行分頁 A 遲到的 completed 回應
-        releaseLateReply.resolve();
-        await submitA;
+            // 設置可觀測的前端處理完成訊號：
+            // 1. 監聽 pageA 收到 response 事件
+            const responsePromise = pageA.waitForEvent('response', {
+                predicate: (res) => res.url().includes('/api/execute'),
+            });
 
-        // 驗證分頁 A 完成回應處理後紀錄未復活
-        assert.equal(await entryByRequestId(pageA, submittedReqId).count(), 0);
+            // 再放行分頁 A 遲到的 completed 回應
+            releaseLateReply.resolve();
+            await submitA;
+            await responsePromise;
 
-        // 重新整理兩分頁，驗證紀錄依然保持已移除狀態
-        await pageA.reload({ waitUntil: 'networkidle' });
-        await pageB.reload({ waitUntil: 'networkidle' });
-        await waitForAppReady(pageA);
-        await waitForAppReady(pageB);
+            // 2. 等待分頁 A 完成遲到回應的前端處理（busy 解除，按鈕回到可用狀態）
+            await pageA.locator('button[type="submit"]:not([disabled])').waitFor({ state: 'visible', timeout: 10_000 });
+            await waitForStatusText(pageA, /completed/i);
 
-        assert.equal(await entryByRequestId(pageA, submittedReqId).count(), 0);
-        assert.equal(await entryByRequestId(pageB, submittedReqId).count(), 0);
+            // 驗證分頁 A 完成回應處理後紀錄未復活
+            assert.equal(await entryByRequestId(pageA, submittedReqId).count(), 0);
 
-        // 後端交易已提交的餘額維持不變（客戶端丟棄不影響後端已提交資料）
-        const afterwards = await getAccountState('demo-user-a');
-        assert.equal(afterwards.balance, before.balance + 30);
-        assert.equal(afterwards.entries, before.entries + 1);
+            // 重新整理兩分頁，驗證紀錄依然保持已移除狀態
+            await pageA.reload({ waitUntil: 'networkidle' });
+            await pageB.reload({ waitUntil: 'networkidle' });
+            await waitForAppReady(pageA);
+            await waitForAppReady(pageB);
+
+            assert.equal(await entryByRequestId(pageA, submittedReqId).count(), 0);
+            assert.equal(await entryByRequestId(pageB, submittedReqId).count(), 0);
+
+            // 後端交易已提交的餘額維持不變（客戶端丟棄不影響後端已提交資料）
+            const afterwards = await getAccountState('demo-user-a');
+            assert.equal(afterwards.balance, before.balance + 30);
+            assert.equal(afterwards.entries, before.entries + 1);
+        } finally {
+            committedOnServer.resolve();
+            releaseLateReply.resolve();
+        }
     });
 });
 
-test('B08 abrupt tab close while holding Web Lock releases lock cleanly for remaining tabs', async () => {
-    await harness.withMultiTabSession('B08', async ({ context, pageA, pageB, baseUrl, getAccountState }) => {
+test('B08 abrupt tab close while holding Web Lock releases lock cleanly for remaining tabs', { timeout: 30_000 }, async () => {
+    await harness!.withMultiTabSession('B08', async ({ context, pageA, pageB, baseUrl, getAccountState }) => {
         const before = await getAccountState('demo-user-a');
         const realLockName = 'firestore-request-ledger:frl-demo:demo-user-a';
 
         // 驗證 1：原生 Web Lock 釋放（分頁 A 持鎖排隊，關閉分頁 A 後分頁 B 成功取得鎖）
         const pageAHeldLock = createDeferred<void>();
-        await pageA.exposeFunction('notifyPageAHeldLock', () => {
-            pageAHeldLock.resolve();
-        });
-
-        // 捕捉因關閉分頁產生的 evaluate 拒絕，避免未處理 rejection
-        let pageAEvalError: unknown = null;
-        const pageALockTask = pageA.evaluate(async (lockName) => {
-            await navigator.locks.request(lockName, async () => {
-                await (window as unknown as { notifyPageAHeldLock: () => Promise<void> }).notifyPageAHeldLock();
-                await new Promise(() => {
-                    // 持續持有鎖直到分頁關閉
-                });
-            });
-        }, realLockName).catch((err: unknown) => {
-            pageAEvalError = err;
-        });
-
-        await pageAHeldLock.promise;
-
-        // 分頁 B 嘗試請求同名鎖（排隊等待）
-        const pageBGotLock = createDeferred<void>();
-        await pageB.exposeFunction('notifyPageBGotLock', () => {
-            pageBGotLock.resolve();
-        });
-
-        const pageBLockTask = pageB.evaluate(async (lockName) => {
-            await navigator.locks.request(lockName, async () => {
-                await (window as unknown as { notifyPageBGotLock: () => Promise<void> }).notifyPageBGotLock();
-            });
-        }, realLockName);
-
-        // 強制關閉分頁 A
-        await pageA.close({ runBeforeUnload: false });
-        await pageALockTask;
-
-        // 驗證分頁 B 成功取得鎖（不死鎖）
-        await pageBGotLock.promise;
-        await pageBLockTask;
-        if (pageAEvalError) {
-            const msg = String(pageAEvalError);
-            assert.ok(msg.includes('Target closed') || msg.includes('destroyed') || msg.includes('closed'));
-        }
-
-        // 驗證 2：分頁透過真實 UI 提交中斷關閉後，另一分頁能依持久化狀態完成合法復原
-        const pageA2 = await context.newPage();
-        await pageA2.goto(baseUrl, { waitUntil: 'networkidle' });
-        await waitForAppReady(pageA2);
-
-        let interruptedReqId = '';
         const serverCommitted = createDeferred<void>();
-        await pageA2.route('**/api/execute', async (route) => {
-            const data = route.request().postDataJSON() as { requestId?: string } | null;
-            interruptedReqId = data?.requestId ?? '';
-            await route.fetch();
+        const pageBGotLock = createDeferred<void>();
+
+        try {
+            await pageA.exposeFunction('notifyPageAHeldLock', () => {
+                pageAHeldLock.resolve();
+            });
+
+            // 捕捉因關閉分頁產生的 evaluate 拒絕，避免未處理 rejection
+            let pageAEvalError: unknown = null;
+            const pageALockTask = pageA.evaluate(async (lockName) => {
+                await navigator.locks.request(lockName, async () => {
+                    await (window as unknown as { notifyPageAHeldLock: () => Promise<void> }).notifyPageAHeldLock();
+                    await new Promise(() => {
+                        // 持續持有鎖直到分頁關閉
+                    });
+                });
+            }, realLockName).catch((err: unknown) => {
+                pageAEvalError = err;
+            });
+
+            await pageAHeldLock.promise;
+
+            // 分頁 B 嘗試請求同名鎖（排隊等待）
+            await pageB.exposeFunction('notifyPageBGotLock', () => {
+                pageBGotLock.resolve();
+            });
+
+            const pageBLockTask = pageB.evaluate(async (lockName) => {
+                await navigator.locks.request(lockName, async () => {
+                    await (window as unknown as { notifyPageBGotLock: () => Promise<void> }).notifyPageBGotLock();
+                });
+            }, realLockName);
+
+            // 強制關閉分頁 A
+            await pageA.close({ runBeforeUnload: false });
+            await pageALockTask;
+
+            // 驗證分頁 B 成功取得鎖（不死鎖）
+            await pageBGotLock.promise;
+            await pageBLockTask;
+            if (pageAEvalError) {
+                const msg = String(pageAEvalError);
+                assert.ok(msg.includes('Target closed') || msg.includes('destroyed') || msg.includes('closed'));
+            }
+
+            // 驗證 2：分頁透過真實 UI 提交中斷關閉後，另一分頁能依持久化狀態完成合法復原
+            const pageA2 = await context.newPage();
+            await pageA2.goto(baseUrl, { waitUntil: 'networkidle' });
+            await waitForAppReady(pageA2);
+
+            let interruptedReqId = '';
+            await pageA2.route('**/api/execute', async (route) => {
+                const data = route.request().postDataJSON() as { requestId?: string } | null;
+                interruptedReqId = data?.requestId ?? '';
+                await route.fetch();
+                serverCommitted.resolve();
+                // 不回傳回應，模擬在提交完成但未收回應時分頁立即崩潰
+            });
+
+            void fillAndSubmit(pageA2, 35, 'b08-ui-crash').catch(() => {});
+            await serverCommitted.promise;
+            assert.ok(interruptedReqId.length >= 8);
+
+            // 關閉 pageA2
+            await pageA2.close({ runBeforeUnload: false });
+
+            // 分頁 B 依據持久化 localStorage 狀態即時渲染出該筆未確認請求
+            const entryInB = entryByRequestId(pageB, interruptedReqId);
+            await entryInB.locator('.badge.unconfirmed').waitFor({ state: 'visible', timeout: 5_000 });
+
+            // 由分頁 B 點擊 Retry with same id 完成重試復原
+            const retryButtonInB = entryInB.getByRole('button', { name: 'Retry with same id' });
+            await retryButtonInB.click();
+            await waitForStatusText(pageB, /replayed/i);
+            await entryInB.locator('.badge.completed').waitFor({ state: 'visible', timeout: 5_000 });
+
+            const afterwards = await getAccountState('demo-user-a');
+            assert.equal(afterwards.balance, before.balance + 35, 'Committed exactly once');
+            assert.equal(afterwards.entries, before.entries + 1);
+        } finally {
+            pageAHeldLock.resolve();
+            pageBGotLock.resolve();
             serverCommitted.resolve();
-            // 不回傳回應，模擬在提交完成但未收回應時分頁立即崩潰
-        });
-
-        void fillAndSubmit(pageA2, 35, 'b08-ui-crash').catch(() => {});
-        await serverCommitted.promise;
-        assert.ok(interruptedReqId.length >= 8);
-
-        // 關閉 pageA2
-        await pageA2.close({ runBeforeUnload: false });
-
-        // 分頁 B 依據持久化 localStorage 狀態即時渲染出該筆未確認請求
-        const entryInB = entryByRequestId(pageB, interruptedReqId);
-        await entryInB.locator('.badge.unconfirmed').waitFor({ state: 'visible', timeout: 5_000 });
-
-        // 由分頁 B 點擊 Retry with same id 完成重試復原
-        const retryButtonInB = entryInB.getByRole('button', { name: 'Retry with same id' });
-        await retryButtonInB.click();
-        await waitForStatusText(pageB, /replayed/i);
-        await entryInB.locator('.badge.completed').waitFor({ state: 'visible', timeout: 5_000 });
-
-        const afterwards = await getAccountState('demo-user-a');
-        assert.equal(afterwards.balance, before.balance + 35, 'Committed exactly once');
-        assert.equal(afterwards.entries, before.entries + 1);
+        }
     });
 });
 
-test('B09 actor isolation across tabs: switching user in tab B is unaffected by pending slot in tab A', async () => {
-    await harness.withMultiTabSession('B09', async ({ pageA, pageB, getAccountState }) => {
+test('B09 actor isolation across tabs: switching user in tab B is unaffected by pending slot in tab A', { timeout: 30_000 }, async () => {
+    await harness!.withMultiTabSession('B09', async ({ pageA, pageB, getAccountState }) => {
         const beforeA = await getAccountState('demo-user-a');
         const beforeB = await getAccountState('demo-user-b');
 
@@ -543,8 +588,8 @@ test('B09 actor isolation across tabs: switching user in tab B is unaffected by 
     });
 });
 
-test('B10 corrupt localStorage slot records block new sends until resetSlot recovers the slot', async () => {
-    await harness.withMultiTabSession('B10', async ({ pageA, pageB, getAccountState }) => {
+test('B10 corrupt localStorage slot records block new sends until resetSlot recovers the slot', { timeout: 30_000 }, async () => {
+    await harness!.withMultiTabSession('B10', async ({ pageA, pageB, getAccountState }) => {
         const before = await getAccountState('demo-user-a');
 
         let droppedReqId = '';

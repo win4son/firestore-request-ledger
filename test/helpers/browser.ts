@@ -124,7 +124,13 @@ export async function createBrowserE2EHarness(): Promise<BrowserE2EHarness> {
     }
 
     const db = emulatorFirestore();
-    const browser: Browser = await chromium.launch({ headless: true });
+    let browser: Browser;
+    try {
+        browser = await chromium.launch({ headless: true });
+    } catch (launchError) {
+        await db.terminate().catch(() => {});
+        throw launchError;
+    }
 
     const withMultiTabSession = async (
         label: string,
@@ -190,13 +196,14 @@ export async function createBrowserE2EHarness(): Promise<BrowserE2EHarness> {
             };
         };
 
-        const context = await browser.newContext();
-        await context.tracing.start({ screenshots: true, snapshots: true });
-
+        let context: BrowserContext | undefined;
         let testError: unknown = null;
         let contextClosed = false;
 
         try {
+            context = await browser.newContext();
+            await context.tracing.start({ screenshots: true, snapshots: true });
+
             const pageA = await context.newPage();
             const pageB = await context.newPage();
 
@@ -214,24 +221,26 @@ export async function createBrowserE2EHarness(): Promise<BrowserE2EHarness> {
             await run({ context, pageA, pageB, baseUrl, db, prefix, getAccountState });
         } catch (error) {
             testError = error;
-            try {
-                mkdirSync(TRACE_OUT_DIR, { recursive: true });
-                const safeLabel = label.replace(/[^a-zA-Z0-9_-]/g, '_');
-                const uniqueSuffix = randomUUID().replace(/-/g, '').slice(0, 8);
-                await context.tracing.stop({ path: resolve(TRACE_OUT_DIR, `${safeLabel}-${uniqueSuffix}.zip`) });
-            } catch (traceError) {
-                // Trace 匯出失敗不得掩蓋原始測試錯誤
-                console.error('Failed to export trace:', traceError);
+            if (context) {
+                try {
+                    mkdirSync(TRACE_OUT_DIR, { recursive: true });
+                    const safeLabel = label.replace(/[^a-zA-Z0-9_-]/g, '_');
+                    const uniqueSuffix = randomUUID().replace(/-/g, '').slice(0, 8);
+                    await context.tracing.stop({ path: resolve(TRACE_OUT_DIR, `${safeLabel}-${uniqueSuffix}.zip`) });
+                } catch (traceError) {
+                    // Trace 匯出失敗不得掩蓋原始測試錯誤
+                    console.error('Failed to export trace:', traceError);
+                }
             }
         } finally {
-            if (!testError && !contextClosed) {
+            if (!testError && !contextClosed && context) {
                 try {
                     await context.tracing.stop();
                 } catch {
                     // ignore
                 }
             }
-            if (!contextClosed) {
+            if (!contextClosed && context) {
                 try {
                     await context.close();
                 } catch {
@@ -250,8 +259,11 @@ export async function createBrowserE2EHarness(): Promise<BrowserE2EHarness> {
     };
 
     const close = async (): Promise<void> => {
-        await browser.close();
-        await db.terminate();
+        try {
+            await browser.close();
+        } finally {
+            await db.terminate();
+        }
     };
 
     return { db, withMultiTabSession, close };
