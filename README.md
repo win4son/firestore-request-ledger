@@ -1,5 +1,10 @@
 # firestore-request-ledger
 
+[![CI](https://github.com/win4son/firestore-request-ledger/actions/workflows/ci.yml/badge.svg)](https://github.com/win4son/firestore-request-ledger/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/firestore-request-ledger)](https://www.npmjs.com/package/firestore-request-ledger)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+![Zero Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
+
 Request deduplication, outcome replay and "result unknown" tracking for
 Firestore transactions and browser clients.
 
