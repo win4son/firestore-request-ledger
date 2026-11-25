@@ -410,7 +410,7 @@ src/server   execute(), lookup(), errors, structural Firestore types
 src/client   createRequestTracker() and its storage/lock ports
 src/shared   canonical JSON and the reply format shared by both sides
 example/     React page + small Node API server, emulator only, synthetic data
-test/        unit (doubles) and integration (Firestore emulator) suites
+test/        unit (doubles), integration (Firestore emulator) and browser E2E (Playwright) suites
 ```
 
 ## Origin

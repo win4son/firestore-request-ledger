@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Actions are pinned to full commit SHAs (the comment names the release); update them deliberately.
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Node.js 24 bundles npm >= 11.5.1 required for npm Trusted Publishing (OIDC) & provenance.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Verify tag matches package.json version
+        run: |
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          EXPECTED_TAG="v${PKG_VERSION}"
+          if [ "${GITHUB_REF_NAME}" != "${EXPECTED_TAG}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match package.json version (${EXPECTED_TAG})"
+            exit 1
+          fi
+
+      - name: Clean install
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Release gate and build
+        run: |
+          npm run check:release
+          npm run build
+
+      - name: Publish to npm via Trusted Publishing (OIDC + Provenance)
+        run: npm publish --provenance --access public
