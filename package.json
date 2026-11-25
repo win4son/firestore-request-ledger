@@ -1,6 +1,6 @@
 {
   "name": "firestore-request-ledger",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Request deduplication, replay and unconfirmed-outcome tracking for Firestore transactions and browser clients.",
   "keywords": [
     "firestore",
