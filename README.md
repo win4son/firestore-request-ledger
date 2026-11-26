@@ -8,7 +8,7 @@
 Request deduplication, outcome replay and "result unknown" tracking for
 Firestore transactions and browser clients.
 
-> **Status: 0.1.0, the first release.** The API can still change before 1.0;
+> **Status: pre-1.0 (`0.x`).** The API can still change before 1.0;
 > read the limitations below before relying on it.
 
 ## The problem
@@ -401,7 +401,7 @@ tracker.subscribe(() => render(tracker.list()));     // this tab and other tabs
 ```
 
 Any transport works (fetch, a Firebase callable, a WebSocket) as long as the
-reply body reaches the tracker unchanged. Full reference: [docs/API.md](docs/API.md).
+reply body reaches the tracker unchanged. Full reference: [docs/API.md](docs/API.md). Integration examples: [docs/RECIPES.md](docs/RECIPES.md). Production operations & cleanup: [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ## Project layout
 
@@ -422,7 +422,7 @@ contains no code, data or history from that app. It has no external users yet.
 
 ## 繁體中文摘要
 
-這是一個 Firestore 請求防重複與結果待確認的小型套件，0.1.0 是第一個公開版本（`npm install firestore-request-ledger`）。1.0 之前介面仍可能調整。
+這是一個 Firestore 請求防重複與結果待確認的小型套件，目前為 0.x 公開版本（`npm install firestore-request-ledger`）。1.0 之前介面仍可能調整。
 
 - 伺服器端：同一使用者、同一請求鍵只會執行一次。業務寫入與請求紀錄在同一筆交易提交；之後以相同內容重送時回放原結果，改了內容就拒絕。重送時仍會重新核對權限。
 - 前端：送出前先把完整請求存進 localStorage。在收到「同一請求鍵」的確定結果前，一律顯示結果未確認，可以查詢或用同一請求鍵重試。連線中斷、逾時或登入／權限拒絕，都不會被當成先前那次失敗。晚到的回應不能推翻已確認的結果；各分頁只寫自己的紀錄，舊畫面的分頁也蓋不掉其他分頁存下的結果；已移除的請求不會因晚到的寫入重新出現。同一表單（slot）是否已有請求，以直接讀取的槽位紀錄（存兩份）判定，不依賴可能漏看的鍵列舉；紀錄損壞時，該表單維持阻擋，直到應用程式核對後呼叫 resetSlot()。紀錄跨分頁可見，寫入儲存失敗時也有對應處理。
