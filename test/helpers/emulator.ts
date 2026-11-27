@@ -1,24 +1,35 @@
 import { randomUUID } from 'node:crypto';
 import { Firestore } from '@google-cloud/firestore';
 
+export interface EmulatorConfig {
+    readonly host: string;
+    readonly projectId: string;
+}
+
 /**
- * Connect to the local Firestore emulator only. Refuses to run unless
- * FIRESTORE_EMULATOR_HOST points at a loopback address and the project id is a
- * `demo-` project, so a misconfigured shell can never reach a real project.
+ * Validate that the process is pointed strictly at a local Firestore emulator
+ * under a `demo-` project id, so a misconfigured shell can never reach a real project.
  */
-export function emulatorFirestore(): Firestore {
+export function emulatorConfig(): EmulatorConfig {
     const host = process.env.FIRESTORE_EMULATOR_HOST ?? '';
     if (!/^(127\.0\.0\.1|localhost|\[::1\]):\d+$/.test(host)) {
         throw new Error('Refusing to run: FIRESTORE_EMULATOR_HOST must point at a local emulator (run via `npm run test:integration`).');
     }
     const projectId = process.env.GCLOUD_PROJECT ?? 'demo-request-ledger';
     if (!projectId.startsWith('demo-')) throw new Error('Refusing to run: the project id must start with "demo-".');
+    return { host, projectId };
+}
+
+/**
+ * Connect to the local Firestore emulator only.
+ */
+export function emulatorFirestore(): Firestore {
+    const { projectId } = emulatorConfig();
     return new Firestore({ projectId });
 }
 
 export function emulatorRestBase(): string {
-    const host = process.env.FIRESTORE_EMULATOR_HOST ?? '';
-    const projectId = process.env.GCLOUD_PROJECT ?? 'demo-request-ledger';
+    const { host, projectId } = emulatorConfig();
     return `http://${host}/v1/projects/${projectId}/databases/(default)/documents`;
 }
 

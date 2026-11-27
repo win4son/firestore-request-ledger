@@ -3,7 +3,7 @@
 Copy-paste starting points for integrating `firestore-request-ledger` into common TypeScript stacks.
 All server examples derive `actor` from verified authentication—never from the request body.
 
-> **Compatibility note**: `firebase-admin/firestore` re-exports `@google-cloud/firestore`, which matches `FirestoreLike`. Automated tests in this repository currently run directly against `@google-cloud/firestore` with the local Firestore emulator.
+> **Compatibility note**: `firebase-admin/firestore` re-exports `@google-cloud/firestore`, which matches `FirestoreLike`. Both default and named `firebase-admin/firestore` databases are verified against the local Firestore emulator (`S17`–`S18`).
 
 ---
 
