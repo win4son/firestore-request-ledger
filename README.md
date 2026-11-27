@@ -184,7 +184,7 @@ the local Firestore emulator. Test ids are in brackets.
 - Cross-tab visibility and notifications [C14, B03]. Storage failure after sending
   [C15]. Slot rules [C17]; concurrent different-content submit across two tabs
   blocks the second tab with slot-busy [B05]. Same-tab double submit sends once
-  [C18]. Unmount/user switch before sending [C19]. Unreadable entries [C21]. Lock
+  [C18]. Unmount/user switch before sending [C19]. Unreadable entries [C21, B11]. Lock
   usage [C22]; abrupt tab close while holding a Web Lock releases the lock cleanly
   for remaining tabs, allowing pending tabs to proceed and recover unconfirmed
   requests [B08].
@@ -247,7 +247,7 @@ the local Firestore emulator. Test ids are in brackets.
   as a cache that can lag behind; single storage operations are atomic in the
   model. Real browser behavior is verified separately in `test/browser`.
 - **Browser automation coverage and boundaries**: The browser E2E tests (`test/browser`,
-  cases `B01`–`B10`) drive the example application across multiple tabs using
+  cases `B01`–`B11`) drive the example application across multiple tabs using
   Playwright against the local Firestore emulator, verifying real `localStorage`,
   native cross-tab `storage` events, and Web Locks (`navigator.locks`). PR CI
   runs headless Chromium (`PLAYWRIGHT_BROWSER=chromium`); a scheduled and
@@ -432,7 +432,7 @@ contains no code, data or history from that app. It has no external users yet.
 - 伺服器端：同一使用者、同一請求鍵只會執行一次。業務寫入與請求紀錄在同一筆交易提交；之後以相同內容重送時回放原結果，改了內容就拒絕。重送時仍會重新核對權限。
 - 前端：送出前先把完整請求存進 localStorage。在收到「同一請求鍵」的確定結果前，一律顯示結果未確認，可以查詢或用同一請求鍵重試。連線中斷、逾時或登入／權限拒絕，都不會被當成先前那次失敗。晚到的回應不能推翻已確認的結果；各分頁只寫自己的紀錄，舊畫面的分頁也蓋不掉其他分頁存下的結果；已移除的請求不會因晚到的寫入重新出現。同一表單（slot）是否已有請求，以直接讀取的槽位紀錄（存兩份）判定，不依賴可能漏看的鍵列舉；紀錄損壞時，該表單維持阻擋，直到應用程式核對後呼叫 resetSlot()。紀錄跨分頁可見，寫入儲存失敗時也有對應處理。
 - 不宣稱外部服務能做到端到端 exactly-once。寄信（SMTP）、Auth 帳號建立／啟用／刪除等交易外副作用都不在保證範圍內。請求鍵不是授權。
-- 測試只使用本機 Firestore emulator 與合成資料，不需要任何正式專案或憑證。除單元與模擬器整合測試外，亦透過 Playwright 驗證真實多分頁跨分頁事件與 Web Locks 競態（`B01`–`B10`，PR CI 執行無頭 Chromium，另設有每週排程與手動觸發的 Chromium／Firefox／WebKit 跨瀏覽器矩陣），且維持零執行期依賴（Zero Runtime Dependencies）。
+- 測試只使用本機 Firestore emulator 與合成資料，不需要任何正式專案或憑證。除單元與模擬器整合測試外，亦透過 Playwright 驗證真實多分頁跨分頁事件與 Web Locks 競態（`B01`–`B11`，PR CI 執行無頭 Chromium，另設有每週排程與手動觸發的 Chromium／Firefox／WebKit 跨瀏覽器矩陣），且維持零執行期依賴（Zero Runtime Dependencies）。
 
 ## License
 
