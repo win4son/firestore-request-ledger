@@ -9,6 +9,24 @@ import type { Faults } from './api.ts';
 const ACTORS = ['demo-user-a', 'demo-user-b'];
 const SLOT = 'add-points';
 
+interface TrackedView {
+    entries: TrackedRequest[];
+    durable: boolean;
+    readable: boolean;
+    brokenCount: number;
+    brokenSlots: string[];
+}
+
+function readTrackedView(tracker: RequestTracker): TrackedView {
+    return {
+        entries: tracker.list(),
+        durable: tracker.durable(),
+        readable: tracker.readable(),
+        brokenCount: tracker.brokenCount(),
+        brokenSlots: tracker.brokenSlots(),
+    };
+}
+
 export function App() {
     const [actor, setActor] = useState(ACTORS[0] as string);
     return (
@@ -33,14 +51,16 @@ export function App() {
     );
 }
 
-function useTrackedRequests(tracker: RequestTracker): { entries: TrackedRequest[]; durable: boolean } {
-    const [state, setState] = useState(() => ({ entries: tracker.list(), durable: tracker.durable() }));
+function useTrackedRequests(tracker: RequestTracker): TrackedView & { refresh: () => void } {
+    const [state, setState] = useState<TrackedView>(() => readTrackedView(tracker));
+    const refresh = useCallback((): void => {
+        setState(readTrackedView(tracker));
+    }, [tracker]);
     useEffect(() => {
-        const refresh = (): void => setState({ entries: tracker.list(), durable: tracker.durable() });
         refresh();
         return tracker.subscribe(refresh);
-    }, [tracker]);
-    return state;
+    }, [tracker, refresh]);
+    return { ...state, refresh };
 }
 
 function describe(outcome: SubmitOutcome): string {
@@ -78,7 +98,7 @@ function Workspace({ actor }: { actor: string }) {
         }),
         [actor],
     );
-    const { entries, durable } = useTrackedRequests(tracker);
+    const { entries, durable, readable, brokenCount, brokenSlots, refresh } = useTrackedRequests(tracker);
     const [amount, setAmount] = useState('25');
     const [note, setNote] = useState('');
     const [message, setMessage] = useState('');
@@ -112,7 +132,10 @@ function Workspace({ actor }: { actor: string }) {
             const text = error instanceof NotSentError ? `not sent (${error.reason}). ${error.message}.` : String(error);
             if (mounted.current) setMessage(`${label}: ${text}`);
         } finally {
-            if (mounted.current) setBusy(false);
+            if (mounted.current) {
+                setBusy(false);
+                refresh();
+            }
             void refreshAccount();
         }
     };
@@ -134,6 +157,50 @@ function Workspace({ actor }: { actor: string }) {
             + 'if it already ran, sending the same thing again would run it again. Check its status first. Discard anyway?',
         );
         if (confirmed) tracker.discard(entry.requestId);
+    };
+
+    const onDiscardBroken = async (): Promise<void> => {
+        setBusy(true);
+        try {
+            const cleaned = await tracker.discardBroken();
+            if (mounted.current) {
+                setMessage(
+                    `Discard broken: removed or repaired ${cleaned} ${cleaned === 1 ? 'record' : 'records'}.`,
+                );
+            }
+        } catch (error) {
+            if (mounted.current) setMessage(`Discard broken: ${String(error)}`);
+        } finally {
+            if (mounted.current) {
+                setBusy(false);
+                refresh();
+            }
+        }
+    };
+
+    const onResetSlot = async (slot: string): Promise<void> => {
+        const confirmed = window.confirm(
+            `Resetting slot "${slot}" rebuilds its local record from current storage keys, which can miss requests. `
+            + 'Verify with the server that no request for this slot is still pending before continuing. Reset slot anyway?',
+        );
+        if (!confirmed) return;
+        setBusy(true);
+        try {
+            const recoveredIds = await tracker.resetSlot(slot);
+            if (mounted.current) {
+                setMessage(
+                    `Reset slot ${slot}: rebuilt with ${recoveredIds.length} remembered `
+                    + `${recoveredIds.length === 1 ? 'request' : 'requests'}.`,
+                );
+            }
+        } catch (error) {
+            if (mounted.current) setMessage(`Reset slot ${slot}: ${String(error)}`);
+        } finally {
+            if (mounted.current) {
+                setBusy(false);
+                refresh();
+            }
+        }
     };
 
     return (
@@ -190,6 +257,56 @@ function Workspace({ actor }: { actor: string }) {
                     {message}
                 </p>
             </section>
+
+            {(!readable || brokenCount > 0 || brokenSlots.length > 0) && (
+                <section className="card" aria-label="Storage recovery">
+                    <h2>Storage recovery</h2>
+                    {!readable && (
+                        <p className="warning">
+                            Browser storage could not be read just now. Showing the last state seen in this tab.
+                        </p>
+                    )}
+                    {brokenCount > 0 && (
+                        <div>
+                            <p className="warning">
+                                {brokenCount} unreadable {brokenCount === 1 ? 'entry was' : 'entries were'} found in
+                                browser storage. New submissions are blocked until cleaned up.
+                            </p>
+                            <div className="actions">
+                                <button
+                                    type="button"
+                                    className="secondary"
+                                    disabled={busy}
+                                    onClick={() => void onDiscardBroken()}
+                                >
+                                    Discard unreadable entries
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                    {brokenSlots.length > 0 && (
+                        <div>
+                            <p className="warning">
+                                Blocked {brokenSlots.length === 1 ? 'slot' : 'slots'} due to damaged localStorage
+                                records: {brokenSlots.join(', ')}. Verify pending requests before resetting.
+                            </p>
+                            <div className="actions">
+                                {brokenSlots.map((slot) => (
+                                    <button
+                                        key={slot}
+                                        type="button"
+                                        className="secondary"
+                                        disabled={busy}
+                                        onClick={() => void onResetSlot(slot)}
+                                    >
+                                        Reset slot {slot}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </section>
+            )}
 
             <section className="card">
                 <h2>Remembered requests</h2>
