@@ -614,16 +614,15 @@ test('B10 corrupt localStorage slot records block new sends until resetSlot reco
         assert.equal(sentWhileBroken, 0, 'broken slot must block network requests');
         await pageB.unroute('**/api/execute');
 
-        // 透過變數路徑動態載入打包後的 client API 呼叫 resetSlot()
-        const recoveredIds = await pageB.evaluate(async (slotName) => {
-            const clientModuleUrl = '/dist/client/index.js';
-            const mod = await import(clientModuleUrl);
-            const tracker = mod.createRequestTracker({ actor: 'demo-user-a', namespace: 'frl-demo' });
-            return tracker.resetSlot(slotName);
-        }, 'add-points');
+        // 透過範例頁的 Storage recovery UI 按鈕與確認對話框呼叫 resetSlot()
+        const resetSlotBtn = pageB.getByRole('button', { name: 'Reset slot add-points' });
+        await resetSlotBtn.waitFor({ state: 'visible', timeout: 5_000 });
+        await pageB.locator('button[type="submit"]:not([disabled])').waitFor({ state: 'visible', timeout: 5_000 });
 
-        assert.ok(Array.isArray(recoveredIds), 'resetSlot returns array of IDs');
-        assert.ok(recoveredIds.includes(droppedReqId), 'Recovered IDs must include the original requestId');
+        pageB.once('dialog', (dialog) => dialog.accept());
+        await resetSlotBtn.click();
+        await waitForStatusText(pageB, /Reset slot add-points: rebuilt with 1 remembered request/i);
+        await resetSlotBtn.waitFor({ state: 'detached', timeout: 5_000 });
 
         // 重新整理分頁 B
         await pageB.reload({ waitUntil: 'networkidle' });
