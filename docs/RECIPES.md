@@ -103,7 +103,7 @@ export const executeOperation = onCall(async (request) => {
   } catch (error) {
     // Return a non-terminal error reply so the tracker keeps the request unconfirmed.
     if (error instanceof LedgerError) {
-      return errorReply(error, typeof body.requestId === 'string' ? body.requestId : undefined);
+      return errorReply(error, typeof body.requestId === 'string' ? body.requestId : null);
     }
     throw new HttpsError('internal', 'Temporary server error');
   }
@@ -121,10 +121,9 @@ export const lookupOperation = onCall(async (request) => {
       db,
       actor,
       requestId: body.requestId as string,
-      expect:
-        typeof body.operation === 'string'
-          ? { operation: body.operation, input: body.input }
-          : undefined,
+      ...(typeof body.operation === 'string'
+        ? { expect: { operation: body.operation, input: body.input } }
+        : {}),
       async authorize(tx, { actor: uid }) {
         const member = await tx.get(db.doc(`members/${uid}`));
         if (member.data()?.active !== true) {
@@ -134,7 +133,7 @@ export const lookupOperation = onCall(async (request) => {
     });
   } catch (error) {
     if (error instanceof LedgerError) {
-      return errorReply(error, typeof body.requestId === 'string' ? body.requestId : undefined);
+      return errorReply(error, typeof body.requestId === 'string' ? body.requestId : null);
     }
     throw error;
   }
@@ -215,7 +214,7 @@ export async function POST(request: Request) {
     return NextResponse.json(reply, { status: 200 });
   } catch (error) {
     const status = error instanceof LedgerError ? 400 : 500;
-    const reqId = typeof body.requestId === 'string' ? body.requestId : undefined;
+    const reqId = typeof body.requestId === 'string' ? body.requestId : null;
     return NextResponse.json(errorReply(error, reqId), { status });
   }
 }
@@ -225,10 +224,10 @@ export async function POST(request: Request) {
 
 ## 4. Minimal React Hook (`useRequestTracker.ts`)
 
-This hook creates a tracker scoped to the signed-in `actor`, subscribes to both same-tab and cross-tab updates, and guards submissions with `stillValid` so unmounted views or account switches do not send stale requests.
+This hook creates a tracker scoped to the signed-in `actor`, uses `useSyncExternalStore` so switching `actor` or `namespace` derives the new tracker's snapshot synchronously (never rendering a previous user's pending requests for a frame), and guards submissions with `stillValid`.
 
 ```ts
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import {
   createRequestTracker,
   type LookupFunction,
@@ -246,6 +245,17 @@ export interface TrackerSnapshot {
   readonly readable: boolean;
 }
 
+const EMPTY_SNAPSHOT: TrackerSnapshot = {
+  requests: [],
+  brokenCount: 0,
+  brokenSlots: [],
+  durable: true,
+  readable: true,
+};
+
+const noopSubscribe = () => () => {};
+const getEmptySnapshot = () => EMPTY_SNAPSHOT;
+
 function readSnapshot(tracker: RequestTracker): TrackerSnapshot {
   return {
     requests: tracker.list(),
@@ -257,15 +267,33 @@ function readSnapshot(tracker: RequestTracker): TrackerSnapshot {
 }
 
 export function useRequestTracker(actor: string | null, namespace = 'frl') {
-  const tracker = useMemo(
-    () => (actor ? createRequestTracker({ actor, namespace }) : null),
-    [actor, namespace],
-  );
+  const store = useMemo(() => {
+    if (!actor) return null;
+    const tracker = createRequestTracker({ actor, namespace });
+    let current = readSnapshot(tracker);
+    return {
+      tracker,
+      subscribe(onStoreChange: () => void) {
+        const unsubscribe = tracker.subscribe(() => {
+          current = readSnapshot(tracker);
+          onStoreChange();
+        });
+        // Refresh once in case another tab mutated storage before the listener attached.
+        current = readSnapshot(tracker);
+        return unsubscribe;
+      },
+      getSnapshot() {
+        return current;
+      },
+    };
+  }, [actor, namespace]);
 
-  const [snapshot, setSnapshot] = useState<TrackerSnapshot>(() =>
-    tracker
-      ? readSnapshot(tracker)
-      : { requests: [], brokenCount: 0, brokenSlots: [], durable: true, readable: true },
+  const tracker = store?.tracker ?? null;
+
+  const snapshot = useSyncExternalStore(
+    store ? store.subscribe : noopSubscribe,
+    store ? store.getSnapshot : getEmptySnapshot,
+    getEmptySnapshot,
   );
 
   const mountedRef = useRef(true);
@@ -274,21 +302,10 @@ export function useRequestTracker(actor: string | null, namespace = 'frl') {
 
   useEffect(() => {
     mountedRef.current = true;
-    if (!tracker) {
-      setSnapshot({ requests: [], brokenCount: 0, brokenSlots: [], durable: true, readable: true });
-      return () => {
-        mountedRef.current = false;
-      };
-    }
-
-    const sync = () => setSnapshot(readSnapshot(tracker));
-    sync();
-    const unsubscribe = tracker.subscribe(sync);
     return () => {
       mountedRef.current = false;
-      unsubscribe();
     };
-  }, [tracker]);
+  }, []);
 
   const submit = useCallback(
     async <I, R = unknown>(
