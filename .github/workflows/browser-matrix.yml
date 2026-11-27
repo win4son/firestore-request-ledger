@@ -1,0 +1,73 @@
+name: Browser Matrix E2E
+
+on:
+  schedule:
+    # Weekly cross-browser check (Mondays 04:00 UTC, staggered from CI's 03:00 UTC).
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+# Actions are pinned to full commit SHAs (matching .github/workflows/ci.yml).
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser-e2e:
+    name: E2E (${{ matrix.browser }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      # The Firestore emulator (firebase-tools 15) needs Java 21 or newer.
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Cache Firebase emulator binaries
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Clean install
+        run: npm ci
+
+      - name: Cache Playwright browser (${{ matrix.browser }})
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ matrix.browser }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright ${{ matrix.browser }}
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Build library and example, check package contents
+        run: npm run build
+
+      - name: Browser multi-tab E2E tests (${{ matrix.browser }})
+        env:
+          PLAYWRIGHT_BROWSER: ${{ matrix.browser }}
+        run: npm run test:browser:run
+
+      - name: Upload Playwright failure traces (${{ matrix.browser }})
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-failure-traces-${{ matrix.browser }}
+          path: test-results/traces/
+          if-no-files-found: ignore
+          retention-days: 14

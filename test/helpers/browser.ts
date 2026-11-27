@@ -6,10 +6,26 @@ import type { AddressInfo } from 'node:net';
 import { extname, isAbsolute, normalize, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Firestore } from '@google-cloud/firestore';
-import { chromium } from 'playwright';
-import type { Browser, BrowserContext, Page } from 'playwright';
+import { chromium, firefox, webkit } from 'playwright';
+import type { Browser, BrowserContext, BrowserType, Page } from 'playwright';
 import { createDemoApp } from '../../example/server.ts';
 import { emulatorFirestore, uniqueName } from './emulator.ts';
+
+export type BrowserEngine = 'chromium' | 'firefox' | 'webkit';
+
+const BROWSER_ENGINES: Record<BrowserEngine, BrowserType> = {
+    chromium,
+    firefox,
+    webkit,
+};
+
+function resolveBrowserEngine(): { name: BrowserEngine; type: BrowserType } {
+    const raw = (process.env.PLAYWRIGHT_BROWSER ?? 'chromium').trim().toLowerCase();
+    if (raw === 'chromium' || raw === 'firefox' || raw === 'webkit') {
+        return { name: raw, type: BROWSER_ENGINES[raw] };
+    }
+    throw new Error(`Unsupported PLAYWRIGHT_BROWSER="${raw}". Expected one of: chromium, firefox, webkit.`);
+}
 
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const EXAMPLE_DIST_DIR = resolve(REPO_ROOT, 'example/dist');
@@ -106,13 +122,14 @@ export interface MultiTabSession {
 }
 
 export interface BrowserE2EHarness {
+    readonly browserName: BrowserEngine;
     readonly db: Firestore;
     withMultiTabSession: (label: string, run: (session: MultiTabSession) => Promise<void>) => Promise<void>;
     close: () => Promise<void>;
 }
 
 /**
- * 啟動本機 Firestore 模擬器連線與無頭 Chromium 瀏覽器。
+ * 啟動本機 Firestore 模擬器連線與無頭瀏覽器（預設 Chromium，可透過 PLAYWRIGHT_BROWSER 切換為 firefox / webkit）。
  * 每個測試案例在 withMultiTabSession 內部享有完全隔離的 Firestore 集合與同源伺服器。
  */
 export async function createBrowserE2EHarness(): Promise<BrowserE2EHarness> {
@@ -123,14 +140,16 @@ export async function createBrowserE2EHarness(): Promise<BrowserE2EHarness> {
         throw new Error('Missing dist/client/index.js. Run `npm run build:lib` before browser tests.');
     }
 
+    const engine = resolveBrowserEngine();
     const db = emulatorFirestore();
     let browser: Browser;
     try {
-        browser = await chromium.launch({ headless: true });
+        browser = await engine.type.launch({ headless: true });
     } catch (launchError) {
         await db.terminate().catch(() => {});
         throw launchError;
     }
+    console.info(`[browser-e2e] engine=${engine.name} version=${browser.version()}`);
 
     const withMultiTabSession = async (
         label: string,
@@ -227,7 +246,7 @@ export async function createBrowserE2EHarness(): Promise<BrowserE2EHarness> {
                     mkdirSync(TRACE_OUT_DIR, { recursive: true });
                     const safeLabel = label.replace(/[^a-zA-Z0-9_-]/g, '_');
                     const uniqueSuffix = randomUUID().replace(/-/g, '').slice(0, 8);
-                    await context.tracing.stop({ path: resolve(TRACE_OUT_DIR, `${safeLabel}-${uniqueSuffix}.zip`) });
+                    await context.tracing.stop({ path: resolve(TRACE_OUT_DIR, `${engine.name}-${safeLabel}-${uniqueSuffix}.zip`) });
                     tracingStarted = false;
                 } catch (traceError) {
                     // Trace 匯出失敗不得掩蓋原始測試錯誤
@@ -267,5 +286,5 @@ export async function createBrowserE2EHarness(): Promise<BrowserE2EHarness> {
         }
     };
 
-    return { db, withMultiTabSession, close };
+    return { browserName: engine.name, db, withMultiTabSession, close };
 }
