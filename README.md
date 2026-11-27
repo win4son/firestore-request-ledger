@@ -98,9 +98,10 @@ available, Web Locks.
 Every claim below has tests in this repository. `test/unit` uses deterministic
 doubles to order races precisely. `test/integration` runs the real
 `@google-cloud/firestore` SDK against the local Firestore emulator. `test/browser`
-drives the example application across multiple tabs in headless Chromium using
-Playwright, verifying native Web Locks, storage events, and recovery against
-the local Firestore emulator. Test ids are in brackets.
+drives the example application across multiple tabs using Playwright (headless
+Chromium by default and in PR CI; selectable via `PLAYWRIGHT_BROWSER` for
+Chromium, Firefox, and WebKit), verifying native Web Locks, storage events,
+and recovery against the local Firestore emulator. Test ids are in brackets.
 
 - One execution and one ledger record for repeated or concurrent same-id
   requests, with identical replies [S02, S03, U09]. Normal single-tab submit
@@ -267,7 +268,8 @@ Using the package:
   `/client` and `/wire` (there is no root entry point). The code is ES2022.
 - Server part: tested on Node.js 22 with `@google-cloud/firestore`.
 - Client part: a browser with Web Storage; Web Locks when available. Unit tests
-  use in-memory doubles; browser E2E tests drive real headless Chromium.
+  use in-memory doubles; browser E2E tests drive headless Chromium by default
+  (and Firefox or WebKit via `PLAYWRIGHT_BROWSER`).
 
 Developing the library:
 
