@@ -652,3 +652,57 @@ test('B10 corrupt localStorage slot records block new sends until resetSlot reco
         assert.equal(afterwards.entries, before.entries + 1);
     });
 });
+
+test('B11 corrupt request entry blocks sends until Discard unreadable entries UI recovers both tabs', { timeout: 30_000 }, async () => {
+    await harness!.withMultiTabSession('B11', async ({ pageA, pageB, getAccountState }) => {
+        const before = await getAccountState('demo-user-a');
+        const corruptKey = 'frl-demo/v1/entry/demo-user-a/corrupt-req-b11';
+
+        // 在分頁 A 寫入一筆無法解析的 request entry
+        await pageA.evaluate((key) => {
+            window.localStorage.setItem(key, '{corrupt-json');
+        }, corruptKey);
+
+        // 分頁 B 透過原生 storage 事件即時顯示 Storage recovery 按鈕
+        const discardBtnB = pageB.getByRole('button', { name: 'Discard unreadable entries' });
+        await discardBtnB.waitFor({ state: 'visible', timeout: 5_000 });
+
+        // 重新整理分頁 A，驗證重新載入後也顯示 Storage recovery 按鈕
+        await pageA.reload({ waitUntil: 'networkidle' });
+        await waitForAppReady(pageA);
+        const discardBtnA = pageA.getByRole('button', { name: 'Discard unreadable entries' });
+        await discardBtnA.waitFor({ state: 'visible', timeout: 5_000 });
+
+        // 存在損壞 entry 時，分頁 B 嘗試送出應被 broken-entries 阻擋，發出 0 次網路請求
+        let sentWhileBroken = 0;
+        await pageB.route('**/api/execute', async (route) => {
+            sentWhileBroken += 1;
+            await route.continue();
+        });
+
+        await fillAndSubmit(pageB, 40, 'b11-blocked-by-broken-entry');
+        await waitForStatusText(pageB, /broken-entries/i);
+        assert.equal(sentWhileBroken, 0, 'broken entries must block network requests');
+        await pageB.unroute('**/api/execute');
+
+        // 透過分頁 A 的 UI 按鈕執行 discardBroken()
+        await discardBtnA.click();
+        await waitForStatusText(pageA, /Discard broken: removed or repaired 1 record\./i);
+        await discardBtnA.waitFor({ state: 'detached', timeout: 5_000 });
+
+        // 確認 localStorage 中的損壞鍵已被清除
+        const remainingCorrupt = await pageA.evaluate((key) => window.localStorage.getItem(key), corruptKey);
+        assert.equal(remainingCorrupt, null, 'corrupt entry key must be removed from localStorage');
+
+        // 分頁 B 免重整透過原生 storage 事件同步清除損壞警告
+        await discardBtnB.waitFor({ state: 'detached', timeout: 5_000 });
+
+        // 恢復後分頁 B 可正常送出新請求並成功寫入一次
+        await fillAndSubmit(pageB, 40, 'b11-after-discard-broken');
+        await waitForStatusText(pageB, /completed/i);
+
+        const afterwards = await getAccountState('demo-user-a');
+        assert.equal(afterwards.balance, before.balance + 40, 'server must commit the post-recovery request');
+        assert.equal(afterwards.entries, before.entries + 1);
+    });
+});
