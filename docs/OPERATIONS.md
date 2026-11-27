@@ -9,20 +9,31 @@ This guide covers how to operate `firestore-request-ledger` safely in production
 Clients must **never** read or write the ledger collection (`requestLedger` by default, or the custom `collection` passed to `execute()` / `lookup()`).
 If a client could write to the ledger collection, it could forge a replayed `completed` outcome without executing your server transaction.
 
-Add an explicit deny rule to your `firestore.rules`:
+> **Critical — Firestore Security Rules do NOT have deny-overrides-allow:**
+> Overlapping `allow` statements are combined with logical **OR**. If your rules contain a broad wildcard allow (such as `match /{document=**} { allow read, write: if request.auth != null; }`), adding `match /requestLedger/{document=**} { allow read, write: if false; }` will **not** protect the ledger.
+
+Use a **default-deny allowlist** structure with no broad `/{document=**}` allow rule, and explicitly deny the ledger collection:
 
 ```
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Deny all client access to the ledger collection.
+    // Ensure no broader wildcard match (e.g. /{document=**}) grants allow here.
     match /requestLedger/{document=**} {
       allow read, write: if false;
+    }
+
+    // Explicitly allow only the application collections clients should access:
+    match /accounts/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if false;
     }
   }
 }
 ```
 
-If you pass a custom `collection` name in `ExecuteOptions` / `LookupOptions`, mirror that exact path in `firestore.rules`.
+If you pass a custom `collection` name in `ExecuteOptions` / `LookupOptions`, mirror that exact path in `firestore.rules` and verify with the Rules emulator that no other `match` block allows client access to it.
 
 ---
 
@@ -88,8 +99,10 @@ export async function pruneExpiredLedgerRecords(collection = 'requestLedger'): P
 
 - **Keep stored results small (`maxResultBytes`)**:
   `execute()` serializes the return value of `write()` into `resultJson` and rejects results larger than `maxResultBytes` (**16 KiB** UTF-8 by default). Return identifiers, updated totals, or concise summaries—not full document payloads.
-- **Ledger record size & cost**:
-  Each completed or terminally rejected request adds one small document to `requestLedger` in the same transaction as your business writes (one extra read + one extra create on first execution; one read on replay).
+- **Ledger record size & transaction cost**:
+  - **Fresh completion**: Runs in the same Firestore transaction as your business writes (+1 ledger read + 1 ledger create).
+  - **Replay**: Runs in a single transaction with 1 ledger read (plus any reads performed by your `authorize` hook) and no writes.
+  - **Fresh terminal rejection (`RequestRejection`)**: Uses **two** transactions—the first transaction reads the ledger and aborts on `RequestRejection` without committing any business writes; a second transaction then re-reads the ledger and creates the `rejected` record (2 ledger reads + 1 ledger create total, unless a concurrent attempt with the same id succeeded in between, in which case that success is returned instead).
 - **Contention retries**:
   Firestore automatically retries transactions on contention. Keep `read()` and `write()` focused on the minimum set of documents needed, and keep `write()` strictly synchronous. If a transaction exhausts contention retries, no ledger record is written and the error propagates as non-terminal, so the client can safely retry with the same `requestId`.
 
