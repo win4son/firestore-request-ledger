@@ -28,7 +28,7 @@ runs `playwright install --with-deps chromium`. On local developer machines,
 `npx playwright install chromium` is sufficient. To run the browser suite on
 another engine, install it first (`npx playwright install firefox webkit`, or
 `npx playwright install --with-deps <browser>` on Linux/CI) and set
-`PLAYWRIGHT_BROWSER=chromium|firefox|webkit` (for example,
+`PLAYWRIGHT_BROWSER` to `chromium`, `firefox`, or `webkit` (for example,
 `PLAYWRIGHT_BROWSER=firefox npm run test:browser:run`).
 
 ## Ground rules
