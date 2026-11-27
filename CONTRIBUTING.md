@@ -8,7 +8,7 @@ with the failure cases tested.
 
 - Node.js 22.18 or newer
 - Java 21 or newer (Firestore emulator)
-- Chromium browser for Playwright E2E tests
+- Playwright browser binary for E2E tests (Chromium by default; Firefox or WebKit when using `PLAYWRIGHT_BROWSER`)
 - No Firebase account, project or credentials are needed
 
 ```sh
@@ -25,7 +25,11 @@ npm run example              # interactive demo on http://127.0.0.1:5191
 
 For Linux / CI environments needing system dependencies, `npm run test:browser:install`
 runs `playwright install --with-deps chromium`. On local developer machines,
-`npx playwright install chromium` is sufficient.
+`npx playwright install chromium` is sufficient. To run the browser suite on
+another engine, install it first (`npx playwright install firefox webkit`, or
+`npx playwright install --with-deps <browser>` on Linux/CI) and set
+`PLAYWRIGHT_BROWSER=chromium|firefox|webkit` (for example,
+`PLAYWRIGHT_BROWSER=firefox npm run test:browser:run`).
 
 ## Ground rules
 
@@ -56,11 +60,12 @@ The bugs this library exists to prevent hide in orderings, so:
   id vs. different id, same actor vs. different actor, before vs. after commit).
 - Give tests an id prefix (`S` server/emulator, `U` server unit, `C` client,
   `E` example, `K`/`W` canonical/wire, `P` release checks, `B` browser E2E tests
-  in `test/browser`, cases `B01`–`B10`) and reference new guarantees in the README.
+  in `test/browser`, cases `B01`–`B11`) and reference new guarantees in the README.
 - If a browser E2E test fails, a trace zip file is automatically captured under
-  `test-results/traces/<case>-<unique-suffix>.zip`. You can inspect it locally with:
+  `test-results/traces/<browser>-<case>-<unique-suffix>.zip` (for example,
+  `chromium-B06-a1b2c3d4.zip` or `firefox-B10-a1b2c3d4.zip`). You can inspect it locally with:
   ```sh
-  npx playwright show-trace test-results/traces/<trace-file>.zip
+  npx playwright show-trace test-results/traces/<browser>-<case>-<unique-suffix>.zip
   ```
 
 ## Pull requests
