@@ -124,6 +124,10 @@ the local Firestore emulator. Test ids are in brackets.
   actor-scoped and writes nothing [S15, U15].
 - The repository's `firestore.rules` (not part of the npm package) deny client
   SDK access to ledger records [S16].
+- `firebase-admin/firestore` instances (`getFirestore(app)`) execute, replay,
+  reject, and lookup identically against the emulator [S17]. Named Firestore
+  databases (`getFirestore(app, databaseId)`) run and replay in full isolation
+  from `(default)` [S18].
 - The tracker saves before sending and always sends the complete stored request
   [C01, C02]. If the request cannot be saved, it is not sent [C03, C04, C25].
 - After a lost response, the request survives a reload. A same-id retry or
@@ -247,12 +251,10 @@ the local Firestore emulator. Test ids are in brackets.
   Playwright in headless Chromium against the local Firestore emulator, verifying
   real `localStorage`, native cross-tab `storage` events, and Web Locks
   (`navigator.locks`). They do not cover Firefox, WebKit, or mobile browsers.
-  In `B10`, slot recovery is exercised by dynamically importing the built client
-  API to call `resetSlot()`, rather than through a dedicated end-user recovery UI.
   Tests run against the local emulator; production Firestore latency, network
   partitions, and catastrophic browser crashes remain outside this suite.
-- Not exercised by the automated tests: the `firebase-admin` Firestore
-  instance (the same class, re-exported), named databases, and production latency.
+- Not exercised by the automated tests: production Firestore latency, real
+  network partitions, and multi-region contention.
 
 ## Requirements
 
